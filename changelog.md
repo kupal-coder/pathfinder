@@ -1,3 +1,13 @@
+# v2.1.1
+
+ * Exports now go to **Eclipse's replay folder** when Eclipse Menu is present:
+   `save/geode/mods/eclipse.eclipse-menu/replays/<level>.gdr2`, which is the
+   folder its replay browser actually reads. Detected by load state *and* by
+   path, so a temporarily disabled Eclipse still gets its macros.
+ * Without Eclipse the macro goes to `game/macros/` on Android as before.
+ * Desktop and Android now pick the destination the same way; only the write
+   differs (direct write vs file picker).
+
 # v2.1.0
 
 ## Click Between Frames support

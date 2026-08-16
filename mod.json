@@ -9,7 +9,7 @@
 	"geode": "5.9.0",
 	"name": "Path Finding",
 	"developer": "perjue",
-	"version": "v2.1.0",
+	"version": "v2.1.1",
 	"dependencies": {
 		"geode.node-ids": {
 			"id": "geode.node-ids",

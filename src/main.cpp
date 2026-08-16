@@ -6,8 +6,9 @@
 #include <UIBuilder.hpp>
 #include "pathfinder.hpp"
 #include <future>
-#ifdef GEODE_IS_ANDROID
 #include <Geode/loader/Dirs.hpp>
+#include <filesystem>
+#ifdef GEODE_IS_ANDROID
 #include <Geode/ui/Notification.hpp>
 #include <fstream>
 #endif
@@ -21,6 +22,30 @@ using namespace geode::utils::file;
  * whose timings only work frame-exact can therefore die with them enabled, so
  * the search hardens its timings against a frame of slop when either is loaded.
  */
+/**
+ * Where a bot will actually look for the macro.
+ *
+ * Eclipse's replay browser only lists files inside its own mod folder, so that
+ * wins when Eclipse is present - checked by path as well as by load state, so a
+ * temporarily disabled Eclipse still gets its macros. Otherwise fall back to the
+ * shared `game/macros` folder on Android, or this mod's save folder on desktop.
+ */
+static std::filesystem::path macroFolder() {
+    if (auto eclipse = Loader::get()->getLoadedMod("eclipse.eclipse-menu"))
+        return eclipse->getSaveDir() / "replays";
+
+    auto eclipseReplays = dirs::getModsSaveDir() / "eclipse.eclipse-menu" / "replays";
+    std::error_code ec;
+    if (std::filesystem::is_directory(eclipseReplays, ec))
+        return eclipseReplays;
+
+#ifdef GEODE_IS_ANDROID
+    return dirs::getGameDir() / "macros";
+#else
+    return Mod::get()->getSaveDir();
+#endif
+}
+
 static bool clickBetweenFramesLoaded() {
     auto loader = Loader::get();
     return loader->isModLoaded("syzzi.click_between_frames")
@@ -95,17 +120,18 @@ public:
         auto macro = result.macro;
 
         auto callback = [this, macro](this auto self) -> arc::Future<void> {
-            auto saveDir = Mod::get()->getSaveDir();
-            if (Loader::get()->isModLoaded("eclipse.eclipse-menu")) {
-                saveDir = Loader::get()->getLoadedMod("eclipse.eclipse-menu")->getSaveDir() / "replays";
-            }
+            auto saveDir = macroFolder();
 
-            if (!exists(saveDir)) {
-                create_directories(saveDir);
+            std::error_code ec;
+            std::filesystem::create_directories(saveDir, ec);
+
+            auto fileName = m_levelName.empty() ? std::string("pathfinder") : m_levelName;
+            for (size_t i = 0; (i = fileName.find_first_of("/\\:*?\"<>|", i)) != std::string::npos; ++i) {
+                fileName[i] = '_';
             }
 
             FilePickOptions opts(
-                saveDir / fmt::format("{}.gdr2", m_levelName), {{
+                saveDir / (fileName + ".gdr2"), {{
                 std::string("Macro File"),
                 std::unordered_set {std::string("gdr2")}
             }});
@@ -114,19 +140,11 @@ public:
             // Android scoped storage makes the system file picker unusable here
             // (camila314/pathfinder#10, geode-sdk/geode#1287): it returns a SAF
             // content:// uri that resolves to "Failed to get file." and leaves a
-            // 0-byte macro behind. Skip the picker and write to the macros folder.
+            // 0-byte macro behind. Skip the picker and write the file ourselves.
             (void)opts;
 
-            auto outDir = geode::dirs::getGameDir() / "macros";
-            std::error_code ec;
-            std::filesystem::create_directories(outDir, ec);
+            auto outPath = saveDir / (fileName + ".gdr2");
 
-            auto fileName = m_levelName.empty() ? std::string("pathfinder") : m_levelName;
-            for (size_t i = 0; (i = fileName.find_first_of("/\\:*?\"<>|", i)) != std::string::npos; ++i) {
-                fileName[i] = '_';
-            }
-
-            auto outPath = outDir / (fileName + ".gdr2");
             bool wrote = false;
             if (!macro.empty()) {
                 std::ofstream out(outPath, std::ios::binary | std::ios::trunc);

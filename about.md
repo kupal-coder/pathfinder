@@ -29,8 +29,11 @@ quietly producing a macro that dies.
 1. Go to a level you want to pathfind, either in your saved or an online level.
 2. Click the blue Path Finding button to start.
 3. Wait for it to say **Solved!** - if it says Incomplete, the macro does not finish the level.
-4. Press Export. On Android the macro is written straight to
-   `Android/media/com.geode.launcher/game/macros/<level>.gdr2`; on desktop you get a file picker.
+4. Press Export. The macro goes where your bot reads it:
+   * **Eclipse Menu installed** - `save/geode/mods/eclipse.eclipse-menu/replays/<level>.gdr2`,
+     so it shows up directly in Eclipse's replay list
+   * **otherwise, Android** - `game/macros/<level>.gdr2`
+   * **desktop** - a file picker, defaulting to the same folder
 5. Import the macro in your bot and play it back.
 
 Every exported macro is replayed from the first frame inside the simulator
