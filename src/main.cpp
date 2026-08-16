@@ -60,10 +60,19 @@ public:
             // Android scoped storage makes the system file picker unusable here
             // (camila314/pathfinder#10, geode-sdk/geode#1287): it returns a SAF
             // content:// uri that resolves to "Failed to get file." and leaves a
-            // 0-byte macro behind. Skip the picker and write to the save dir.
+            // 0-byte macro behind. Skip the picker and write to the macros folder.
             (void)opts;
 
-            auto outPath = geode::dirs::getSaveDir() / "pathfinder_macro.gdr";
+            auto outDir = geode::dirs::getGameDir() / "macros";
+            std::error_code ec;
+            std::filesystem::create_directories(outDir, ec);
+
+            auto fileName = m_levelName.empty() ? std::string("pathfinder") : m_levelName;
+            for (size_t i = 0; (i = fileName.find_first_of("/\\:*?\"<>|", i)) != std::string::npos; ++i) {
+                fileName[i] = '_';
+            }
+
+            auto outPath = outDir / (fileName + ".gdr2");
             bool wrote = false;
             if (!macro.empty()) {
                 std::ofstream out(outPath, std::ios::binary | std::ios::trunc);
