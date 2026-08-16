@@ -2,26 +2,36 @@
 
 Auto-generate macros for levels using simulation! This mod uses a physics simulator under the hood to solve levels in seconds! It does not come with a bot, you will need to install one for this.
 
-# None of these objects are supported
-- Duals
-- Upside-down Slopes
-- Partially Rotated Objects for Cube, UFO, Ball
-- Robot Mode
-- Spider Mode
-- Swing Mode
-- Any Non-Visual Triggers
-- Dash Orbs
-- Teleport Portals
-- Anything from 2.2
-- Modifier blocks (D-block J-block etc)
+Based on camila314's Pathfinder, rebuilt with a wider simulator and a much stronger search.
+
+# What is simulated
+
+- Cube, ship, ball, UFO, wave, **robot**, **spider** and **swing**
+- **Duals** (both players are simulated; the attempt ends if either one dies)
+- Orbs including **dash orbs**, **pink dash orbs** and **spider orbs**
+- Pads including the **red pad**
+- Gravity, size, speed and vehicle portals
+- **Teleport portals** (the classic blue/orange pair)
+- Slopes, blocks, breakable blocks, hazards and sawblades
+
+# Still not supported
+
+- Triggers of any kind, so most 2.2 gameplay (moving objects, gravity triggers,
+  time warp, target-based teleports)
+- Mirror portals
+- Partially rotated objects use an unrotated hitbox
+
+If a level uses any of these, the mod now **tells you which ones** instead of
+quietly producing a macro that dies.
 
 # How To Use
 
 1. Go to a level you want to pathfind, either in your saved or an online level.
-2. Click the blue Pathfinder button to start the pathfinder.
-3. Export the macro into the correct folder of whichever bot you are using.
-4. Import the macro and play it back!
+2. Click the blue Path Finding button to start.
+3. Wait for it to say **Solved!** - if it says Incomplete, the macro does not finish the level.
+4. Press Export. On Android the macro is written straight to
+   `Android/media/com.geode.launcher/game/macros/<level>.gdr2`; on desktop you get a file picker.
+5. Import the macro in your bot and play it back.
 
-# Report Bugs
-
-Any simulation bugs need to be reported in the [Discord](https://discord.gg/u9m7kqyqxu)
+Every exported macro is replayed from the first frame inside the simulator
+before it is written, so a macro that says Solved really does reach the end.

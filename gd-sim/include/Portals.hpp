@@ -26,3 +26,17 @@ struct SpeedPortal : public EffectObject {
     SpeedPortal(Vec2D size, std::unordered_map<int, std::string>&& fields);
     void collide(Player&) const override;
 };
+
+/// Classic (non-target) teleport portal. The blue half carries the y offset.
+struct TeleportPortal : public EffectObject {
+    float yOffset;
+    TeleportPortal(Vec2D size, std::unordered_map<int, std::string>&& fields);
+    void collide(Player&) const override;
+};
+
+/// Dual (286) and single (287) portals. Level does the actual player spawning.
+struct DualPortal : public EffectObject {
+    bool enable;
+    DualPortal(Vec2D size, std::unordered_map<int, std::string>&& fields);
+    void collide(Player&) const override;
+};

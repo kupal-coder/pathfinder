@@ -1,5 +1,5 @@
 {
-	"id": "camila314.pathfinder",
+	"id": "perjue.pathfinding",
 	"gd": {
 		"win": "2.2081",
 		"android": "2.2081",
@@ -9,7 +9,7 @@
 	"geode": "5.9.0",
 	"name": "Path Finding",
 	"developer": "perjue",
-	"version": "v1.0.0-beta.243",
+	"version": "v2.0.0",
 	"dependencies": {
 		"geode.node-ids": {
 			"id": "geode.node-ids",
@@ -25,7 +25,6 @@
 	"description": "Beat levels automatically!",
 	"tags": ["offline", "gameplay", "utility"],
 	"links": {
-	    "community": "https://discord.com/invite/u9m7kqyqxu",
-	    "source": "https://github.com/camila314/pathfinder"
+		"source": "https://github.com/kupal-coder/pathfinder"
 	}
 }

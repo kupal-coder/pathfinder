@@ -40,7 +40,7 @@ struct Object : public Entity {
  * it also allows for better CPU caching since all Object classes are stored contiguously in memory.
  */
 struct ObjectContainer {
-    char buffer[sizeof(Object) + 0x8] = {0};
+    char buffer[sizeof(Object) + 0x18] = {0};
 
     ObjectContainer(ObjectContainer& cont) { memcpy(buffer, cont.buffer, sizeof(buffer)); }
     ObjectContainer(ObjectContainer const& cont) { memcpy(buffer, cont.buffer, sizeof(buffer)); }

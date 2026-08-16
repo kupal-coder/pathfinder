@@ -2,12 +2,16 @@
 
 #include <functional>
 
+/// Values match RobTop's kA2 level-setting order.
 enum class VehicleType {
 	Cube,
 	Ship,
 	Ball,
 	Ufo,
-	Wave
+	Wave,
+	Robot,
+	Spider,
+	Swing
 };
 
 struct Player;

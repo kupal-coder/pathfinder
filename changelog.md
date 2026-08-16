@@ -1,61 +1,37 @@
-# beta 24
+# v2.0.0
 
-- Red Orb & Red Pad
-- Black Orb
-- Green Orb
+Large rewrite of the simulator and the search. Renamed to **Path Finding**.
 
-# beta 23
+## New gameplay support
+ * **Robot**, **spider** and **swing** gamemodes
+ * **Duals** - the second player is simulated and the attempt fails if either dies
+ * **Dash orbs**, **pink dash orbs** and **spider orbs**
+ * **Teleport portals** (classic blue/orange pair)
+ * **Red pads** - the physics were already there, the object id was never registered
 
-- Fixed object snapping forever
-- Partial upside-down slope support
-- Start Pos support
-- More bug fixes
+## New search
+ * Runs on every CPU core instead of one
+ * Samples realistic click schedules per gamemode instead of uniform noise, so
+   held inputs (dash orbs, robot boosts, long ship thrusts) actually get tried
+ * Refines the best candidate by jittering its timings
+ * Never commits to a state that dies shortly after, which is what caused macros
+   to look finished and then die at the first jump
+ * Backtracks to earlier checkpoints with growing distance when stuck
+ * Deterministic - the same level searches the same way every time
 
-# beta 22.1 (bugfix)
-- Fixed bug where player's hitbox was larger than intended
+## Correctness
+ * Exported macros are replayed from frame 0 and verified before being written;
+   the UI now says **Solved** or **Incomplete** instead of always looking finished
+ * Fixed copied levels sharing the original's state history, which corrupted the
+   exported input list
+ * Fixed `Player` leaving `buffer`, `gravityPortal`, `dt` and `level` uninitialised
+ * Fixed a crash on levels with no recognised objects
+ * Fixed objects in the first and last section colliding twice per frame
+ * Fixed the out of bounds check comparing a Y position against the level length
+ * Frame numbers are 32 bit, so levels longer than 4m33s no longer wrap
+ * Unsupported objects in a level are now named in the UI and the log
 
-# beta 22
-
-- Rotated object support for ship and wave
-- Slope fixes
-- 4x speed
-- Wave fixes
-- Debug button added
-- Fixed bounds for vehicles in level settings
-
-# beta 21.1 (minor fix)
-- Fixed bug where hitting pads while wave caused an error
-
-# beta 21
-
-- Full (hopefully) wave support
-- More slope fixes
-- Fixed bug where ship was inaccurate in beta 20
-- Other minor fixes
-
-# beta 20
-
-- Lots of slope fixes
-- Ship hitbox fixes
-
-# beta 19
-
-- Fix ship accelerations
-- Wave is now slightly more functional
-- Slope ejections are accurate
-- Everything is debug mode now
-
-# beta 18
-## Fix tons of bugs:
-- Blue portal on floor would kill
-- Landing on right edge of blocks did wrong x-snapping
-- Small cube didn't snap on 90-60 stairs
-- Priority issue when hitting block and orb on the same frame
-
-# beta 17
-- Fix bug where export doesn't show up
-
-# beta 1-16
-- Initial Release
-- geode index does not allow for link transfers without updating the entire mod (and therefore pushing a new update to everyone)
-- this is not a new version. it is the same version. the geode index people do not like flexibility (?) 
+## Android
+ * Export no longer uses the file picker, which scoped storage blocks
+   (camila314/pathfinder#10, geode-sdk/geode#1287)
+ * Macros are written to `game/macros/<level>.gdr2` with a notification

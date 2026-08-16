@@ -18,8 +18,9 @@ using namespace geode::utils::file;
 class PathfinderNode : public CCLayerColor {
     std::atomic_bool m_stop = false;
     std::atomic<double> m_progress = 0;
-    std::future<std::vector<uint8_t>> m_result;
+    std::future<PathfindResult> m_result;
     std::string m_levelName;
+    bool m_done = false;
 public:
     static PathfinderNode* create(std::string const& levelName, std::string const& lvlString) {
         auto node = new PathfinderNode();
@@ -37,9 +38,34 @@ public:
             m_result.get();
     }
 
-    void finalize(std::vector<uint8_t> macro) {
-        getChildByIDRecursive("stop")->setVisible(false);
- 
+    void finalize(PathfindResult result) {
+        if (m_done)
+            return;
+        m_done = true;
+
+        if (auto stopBtn = getChildByIDRecursive("stop"))
+            stopBtn->setVisible(false);
+
+        // Say plainly whether this macro actually finishes the level. A run that
+        // stopped at 40% is still exportable, but it must not look like a win.
+        Build(this).intoChildRecurseID<CCLabelBMFont>("title")
+            .string(result.completed ? "Solved!" : "Incomplete");
+
+        Build(this).intoChildRecurseID<CCLabelBMFont>("percent")
+            .string(fmt::format("{:.2f}% - {} clicks", result.progress, result.clicks).c_str());
+
+        if (!result.warnings.empty()) {
+            log::warn("level uses mechanics the simulator cannot model:");
+            for (auto const& w : result.warnings)
+                log::warn("  - {}", w);
+
+            Build(this).intoChildRecurseID<CCLabelBMFont>("warning")
+                .string(fmt::format("Unsupported: {}", result.warnings.front()).c_str())
+                .scale(0.32f);
+        }
+
+        auto macro = result.macro;
+
         auto callback = [this, macro](this auto self) -> arc::Future<void> {
             auto saveDir = Mod::get()->getSaveDir();
             if (Loader::get()->isModLoaded("eclipse.eclipse-menu")) {
@@ -108,7 +134,10 @@ public:
 #endif
         };
 
-        Build<ButtonSprite>::create("Export", "bigFont.fnt", "GJ_button_01.png")
+        char const* exportLabel = result.completed ? "Export" : "Export anyway";
+
+        Build<ButtonSprite>::create(exportLabel, "bigFont.fnt",
+                result.completed ? "GJ_button_01.png" : "GJ_button_04.png")
             .intoMenuItem(async::wrapSpawn(callback))
             .scale(0.8)
             .move(0, -40)
@@ -127,21 +156,28 @@ public:
 
         m_levelName = levelName;
 
-        m_result = std::async(std::launch::async, [lvlString, this]() {
+        m_result = std::async(std::launch::async, [lvlString, levelName, this]() -> PathfindResult {
             try {
-            return pathfind(lvlString, m_stop, [this](double progress) {
-                if (m_progress < progress)
-                    m_progress = progress;
-            });
+                return pathfind(lvlString, m_stop, [this](double progress) {
+                    if (m_progress < progress)
+                        m_progress = progress;
+                }, levelName);
             } catch (std::exception& e) {
                 log::error("{}", e.what());
-                return std::vector<uint8_t>();
+                PathfindResult failed;
+                failed.warnings.push_back("the simulator hit an internal error");
+                return failed;
             }
         });
 
         setKeypadEnabled(true);
 
         Build(this).initTouch().schedule([this](float) {
+                // Once finalize() has run the labels show the result, so stop
+                // overwriting them with the live progress.
+                if (m_done)
+                    return;
+
                 Build(this).intoChildRecurseID<CCLabelBMFont>("percent")
                     .string(fmt::format("{:.2f}%", m_progress).c_str());
 
@@ -153,18 +189,25 @@ public:
         auto handle = [this](CCMenuItemSpriteExtra* it) {
             m_stop = true;
 
-            if (it->getID() == "stop")
-                finalize(m_result.get());
-            else
+            if (it->getID() == "stop") {
+                if (m_result.valid())
+                    finalize(m_result.get());
+            } else {
                 removeFromParentAndCleanup(true);
+            }
         };
 
         auto menu = Build<CCMenu>::create().parent(this).id("menu").children(
             Build<CCScale9Sprite>::create("GJ_square02.png")
                 .contentSize(250, 140),
             Build<CCLabelBMFont>::create("Pathfinding...", "bigFont.fnt")
+                .id("title")
                 .move(0, 50)
                 .scale(0.8),
+            Build<CCLabelBMFont>::create("", "chatFont.fnt")
+                .id("warning")
+                .move(0, -12)
+                .scale(0.32f),
             Build<CCLabelBMFont>::create("0.00", "chatFont.fnt")
                 .id("percent")
                 .move(0, 10),

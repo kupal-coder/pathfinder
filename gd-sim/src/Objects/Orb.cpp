@@ -1,5 +1,7 @@
 #include <Orb.hpp>
 #include <Player.hpp>
+#include <Level.hpp>
+#include <cmath>
 
 Orb::Orb(Vec2D size, std::unordered_map<int, std::string>&& fields) : EffectObject(size, std::move(fields)) {
 	switch (std::stoi(fields[1])) {
@@ -20,6 +22,15 @@ Orb::Orb(Vec2D size, std::unordered_map<int, std::string>&& fields) : EffectObje
 			break;
 		case 1022:
 			type = OrbType::Green;
+			break;
+		case 1704:
+			type = OrbType::Dash;
+			break;
+		case 1751:
+			type = OrbType::DashPink;
+			break;
+		case 1594:
+			type = OrbType::Spider;
 			break;
 		default:
 			type = OrbType::Yellow;
@@ -107,6 +118,32 @@ void Orb::collide(Player& p) const {
 		p.vehicleBuffer = false;
 
 		EffectObject::collide(p);
+
+		// Dash orbs lock the player to the ring's angle for as long as it is held
+		if (type == OrbType::Dash || type == OrbType::DashPink) {
+			if (type == OrbType::DashPink)
+				p.upsideDown = !p.upsideDown;
+
+			p.dashing = true;
+			p.dashAngle = -rotation;
+			p.grounded = false;
+			p.velocityOverride = true;
+			return;
+		}
+
+		// Spider orbs teleport exactly like spider mode does
+		if (type == OrbType::Spider) {
+			if (auto target = p.level->spiderTarget(p))
+				p.pos.y = *target;
+			else
+				p.pos.y = p.grav(p.gravCeiling()) - p.grav(p.size.y / 2);
+
+			p.upsideDown = !p.upsideDown;
+			p.setVelocity(0, true);
+			p.grounded = true;
+			p.input = false;
+			return;
+		}
 
 		// Wave can't use non-gravity orbs
 		if (p.vehicle.type != VehicleType::Wave) {

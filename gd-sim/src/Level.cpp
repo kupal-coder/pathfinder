@@ -1,5 +1,6 @@
 #include <sstream>
 #include <iomanip>
+#include <limits>
 #include <Level.hpp>
 
 void Level::initLevelSettings(std::string const& lvlSettings, Player& player) {
@@ -70,6 +71,9 @@ Level::Level(std::string const& lvlString) {
 			player.pos.y = stod_def(obj[3], 0);
 		}
 
+		// Read the id before the map is moved into create()
+		int objectId = atoi(obj[1].c_str());
+
 		if (auto ob_o = Object::create(std::move(obj))) {
 			auto ob = ob_o.value();
 
@@ -84,6 +88,10 @@ Level::Level(std::string const& lvlString) {
 
 			if (ob->pos.x > length)
 				length = ob->pos.x + 100;
+		} else if (objectId > 0) {
+			// Nothing in the simulator matches this id, so it will be invisible to
+			// the physics. Pathfinder reports these so a desync can be explained.
+			unknownObjects[objectId]++;
 		}
 	}
 
@@ -91,15 +99,73 @@ Level::Level(std::string const& lvlString) {
 	gameStates.push_back(player);
 }
 
-Player& Level::runFrame(bool pressed, float dt) {
-	Player p = gameStates.back();
+void Level::rebind() {
+	for (auto& p : gameStates)
+		p.level = this;
+	for (auto& p : gameStates2)
+		p.level = this;
+}
 
-	// Can't play if you're dead
-	if (p.dead)
-		return gameStates.back();
+Level::Level(Level const& other) :
+	gameStates(other.gameStates), gameStates2(other.gameStates2),
+	dualStartFrame(other.dualStartFrame), dual(other.dual),
+	objectCount(other.objectCount), sections(other.sections),
+	unknownObjects(other.unknownObjects), length(other.length), debug(other.debug) {
+	rebind();
+}
 
+Level& Level::operator=(Level const& other) {
+	if (this == &other)
+		return *this;
+
+	gameStates = other.gameStates;
+	gameStates2 = other.gameStates2;
+	dualStartFrame = other.dualStartFrame;
+	dual = other.dual;
+	objectCount = other.objectCount;
+	sections = other.sections;
+	unknownObjects = other.unknownObjects;
+	length = other.length;
+	debug = other.debug;
+	rebind();
+	return *this;
+}
+
+Level::Level(Level&& other) noexcept :
+	gameStates(std::move(other.gameStates)), gameStates2(std::move(other.gameStates2)),
+	dualStartFrame(other.dualStartFrame), dual(other.dual),
+	objectCount(other.objectCount), sections(std::move(other.sections)),
+	unknownObjects(std::move(other.unknownObjects)), length(other.length), debug(other.debug) {
+	rebind();
+}
+
+Level& Level::operator=(Level&& other) noexcept {
+	if (this == &other)
+		return *this;
+
+	gameStates = std::move(other.gameStates);
+	gameStates2 = std::move(other.gameStates2);
+	dualStartFrame = other.dualStartFrame;
+	dual = other.dual;
+	objectCount = other.objectCount;
+	sections = std::move(other.sections);
+	unknownObjects = std::move(other.unknownObjects);
+	length = other.length;
+	debug = other.debug;
+	rebind();
+	return *this;
+}
+
+void Level::stepPlayer(Player& p, bool pressed, float dt) {
 	p.dt = dt;
 	p.preCollision(pressed);
+
+	// A level with no simulated objects at all has no sections to index into.
+	if (sections.empty()) {
+		if (!p.dead)
+			p.postCollision();
+		return;
+	}
 
 	// Objects from previous, current, and next section are all collision tested
 	size_t sectionIdx = std::min(std::max(0, (int)(p.pos.x / sectionSize)), (int)sections.size() - 1);
@@ -108,11 +174,14 @@ Player& Level::runFrame(bool pressed, float dt) {
 	auto nextSection = &sections[sectionIdx + 1 >= sections.size() - 1 ? sections.size() - 1 : sectionIdx + 1];
 
 	// If at start or end of level, previous/next section is invalid so don't use it
-	std::vector<ObjectContainer>* sections[3] = { prevSection, nullptr, nullptr };
-	if (&currSection != &prevSection)
-		sections[1] = currSection;
-	if (&nextSection != &currSection)
-		sections[2] = nextSection;
+	// NOTE: this used to compare &currSection against &prevSection, which are the
+	// addresses of the local pointers and so never equal. At the first and last
+	// section that made the same objects collide twice in one frame.
+	std::vector<ObjectContainer>* sectionList[3] = { prevSection, nullptr, nullptr };
+	if (currSection != prevSection)
+		sectionList[1] = currSection;
+	if (nextSection != currSection && nextSection != prevSection)
+		sectionList[2] = nextSection;
 
 	// Blocks are hazards processed separately
 	std::vector<ObjectContainer> blocks;
@@ -122,7 +191,7 @@ Player& Level::runFrame(bool pressed, float dt) {
 
 	size_t numCollisions = 0;
 
-	for (auto section : sections) {
+	for (auto section : sectionList) {
 		if (section == nullptr) continue;
 		for (auto& o : *section) {
 			if (p.dead) break;
@@ -152,14 +221,13 @@ Player& Level::runFrame(bool pressed, float dt) {
 		if (h->touching(p)) {
 			++numCollisions;
 			h->collide(p);
-			
 		}
 	}
 
 	if (!p.dead)
 		p.postCollision();
 
-	if (debug) {
+	if (debug && !p.second) {
 		std::cout << "Frame " << gameStates.size() << std::fixed << std::setprecision(8)
 				  << " X " << p.pos.x << " Y " << p.pos.y - 15 << " Vel " << p.velocity
 				  << " Accel " << p.acceleration << " Rot " << p.rotation << " Coll " << numCollisions
@@ -169,6 +237,57 @@ Player& Level::runFrame(bool pressed, float dt) {
 			std::cout << "Input X " << p.pos.x << " Y " << p.pos.y - 15 << std::endl;
 		}
 	}
+}
+
+Player& Level::runFrame(bool pressed, float dt) {
+	Player p = gameStates.back();
+
+	// Can't play if you're dead
+	if (p.dead)
+		return gameStates.back();
+
+	bool wasDual = dual;
+	Player p2;
+	if (wasDual && !gameStates2.empty())
+		p2 = gameStates2.back();
+
+	stepPlayer(p, pressed, dt);
+
+	if (wasDual && !gameStates2.empty()) {
+		if (!p2.dead)
+			stepPlayer(p2, pressed, dt);
+
+		// The attempt ends when *either* player dies
+		if (p2.dead)
+			p.dead = true;
+
+		gameStates2.push_back(p2);
+	}
+
+	// A dual portal was hit this frame: spawn the second player mirrored across it
+	if (p.startDual && !dual) {
+		Player mirror = p;
+		mirror.second = true;
+		mirror.pos.y = 2 * p.dualMirrorY - p.pos.y;
+		mirror.upsideDown = !p.upsideDown;
+		mirror.velocity = -p.velocity;
+		mirror.grounded = false;
+		mirror.startDual = false;
+		mirror.usedEffects.clear();
+
+		dual = true;
+		dualStartFrame = p.frame;
+		gameStates2.clear();
+		gameStates2.push_back(mirror);
+	}
+	if (p.stopDual && dual) {
+		dual = false;
+		dualStartFrame = 0;
+		gameStates2.clear();
+	}
+
+	p.startDual = false;
+	p.stopDual = false;
 
 	gameStates.push_back(p);
 	return gameStates.back();
@@ -177,6 +296,18 @@ Player& Level::runFrame(bool pressed, float dt) {
 
 void Level::rollback(int frame) {
 	gameStates.resize(frame > 0 ? frame : 1);
+
+	if (dual) {
+		int keep = currentFrame() - dualStartFrame + 1;
+		if (keep <= 0) {
+			// Rolled back past the dual portal entirely
+			dual = false;
+			dualStartFrame = 0;
+			gameStates2.clear();
+		} else if ((size_t)keep < gameStates2.size()) {
+			gameStates2.resize(keep);
+		}
+	}
 }
 
 int Level::currentFrame() const {
@@ -186,11 +317,71 @@ int Level::currentFrame() const {
 Player const& Level::getState(int frame) const {
 	if (frame == 0)
 		return gameStates[0];
-	if (gameStates.size() < frame)
+	if (gameStates.size() < (size_t)frame)
 		return gameStates.back();
 	return gameStates[frame - 1];
 }
 
+Player const& Level::getState(int frame, bool second) const {
+	if (!second || gameStates2.empty())
+		return getState(frame);
+
+	int idx = frame - dualStartFrame;
+	if (idx < 0)
+		idx = 0;
+	if ((size_t)idx >= gameStates2.size())
+		idx = gameStates2.size() - 1;
+	return gameStates2[idx];
+}
+
 Player& Level::latestState() {
 	return gameStates.back();
+}
+
+Player const& Level::latestState() const {
+	return gameStates.back();
+}
+
+bool Level::anyDead() const {
+	if (gameStates.back().dead)
+		return true;
+	return dual && !gameStates2.empty() && gameStates2.back().dead;
+}
+
+std::optional<float> Level::spiderTarget(Player const& p) const {
+	if (sections.empty())
+		return std::nullopt;
+
+	// The spider teleports to the nearest surface *overhead*, which is the
+	// opposite of the gravity direction.
+	int dir = p.upsideDown ? -1 : 1;
+	Entity hb = p.unrotatedHitbox();
+
+	float bestGap = std::numeric_limits<float>::max();
+	std::optional<float> best;
+
+	int idx = std::min(std::max(0, (int)(p.pos.x / sectionSize)), (int)sections.size() - 1);
+	for (int s = idx - 1; s <= idx + 1; ++s) {
+		if (s < 0 || s >= (int)sections.size())
+			continue;
+
+		for (auto const& o : sections[s]) {
+			if (o->prio != 1)
+				continue;
+			if (o->getRight() <= hb.getLeft() || o->getLeft() >= hb.getRight())
+				continue;
+
+			float surface = dir > 0 ? o->getBottom() : o->getTop();
+			float gap = dir > 0 ? surface - hb.getTop() : hb.getBottom() - surface;
+			if (gap <= 0)
+				continue;
+
+			if (gap < bestGap) {
+				bestGap = gap;
+				best = surface - dir * (p.size.y / 2);
+			}
+		}
+	}
+
+	return best;
 }

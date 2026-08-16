@@ -8,6 +8,12 @@ enum class OrbType {
 	Red,
 	Green,
 	Black,
+	/// Green dash orb: hold to travel along the ring's angle.
+	Dash,
+	/// Pink dash orb: same, but flips gravity first.
+	DashPink,
+	/// Spider orb: teleports to the surface the arrow points at and flips gravity.
+	Spider,
 };
 
 struct Orb : public EffectObject {

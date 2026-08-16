@@ -23,11 +23,16 @@ void Player::setVelocity(double v, bool override) {
 }
 
 Player const& Player::prevPlayer() const {
-	return level->getState(frame - 1);
+	return level->getState(frame - 1, second);
 }
 
 Player const* Player::nextPlayer() const {
-	return level->currentFrame() <= frame ? nullptr : &level->getState(frame + 1);
+	return level->currentFrame() <= frame ? nullptr : &level->getState(frame + 1, second);
+}
+
+void Player::endDash() {
+	dashing = false;
+	dashAngle = 0;
 }
 
 /**
@@ -101,7 +106,20 @@ void Player::postCollision() {
 		coyoteFrames = INT_MAX;
 	}
 
-	vehicle.update(*this);
+	// A dash orb overrides the vehicle entirely: the player travels in a straight
+	// line at the ring's angle until the button is released.
+	if (dashing && !input)
+		endDash();
+
+	if (dashing) {
+		velocity = std::tan(deg2rad(dashAngle)) * player_speeds[speed] * (upsideDown ? -1 : 1);
+		acceleration = 0;
+		velocityOverride = true;
+		grounded = false;
+		rotation = dashAngle;
+	} else {
+		vehicle.update(*this);
+	}
 
 	if (!velocityOverride) {
 		double newVel = velocity + acceleration * dt;
@@ -131,13 +149,18 @@ void Player::postCollision() {
 }
 
 Player::Player() :
-	Entity({{0, 15}, {30, 30}, 0}), frame(1), timeElapsed(0), dead(false),
+	// Every field is initialised: `level`, `buffer`, `gravityPortal` and `dt` used
+	// to be left uninitialised, so the very first frame read indeterminate values.
+	Entity({{0, 15}, {30, 30}, 0}), level(nullptr), frame(1), timeElapsed(0), dead(false),
 	vehicle(Vehicle::from(VehicleType::Cube)),
 	ceiling(999999), floor(0), grounded(true),
 	coyoteFrames(0), acceleration(0), velocity(0),
 	velocityOverride(false), button(false), input(false),
 	vehicleBuffer(false), upsideDown(false), small(false),
-	speed(1), slopeData({{}, 0, false}), roundVelocity(true) {}
+	speed(1), slopeData({{}, 0, false}), roundVelocity(true),
+	robotJumpFrame(-1000), dashing(false), dashAngle(0),
+	startDual(false), dualMirrorY(0), stopDual(false), second(false),
+	buffer(false), gravityPortal(false), dt(1 / 240.) {}
 
 
 

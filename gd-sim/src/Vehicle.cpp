@@ -1,5 +1,6 @@
 #include <Vehicle.hpp>
 #include <Player.hpp>
+#include <Level.hpp>
 #include <Object.hpp>
 #include <algorithm>
 #include <Slope.hpp>
@@ -377,6 +378,184 @@ Vehicle wave() {
 	return v;
 }
 
+
+/*
+	Robot, spider and swing were added after this simulator was written, so their
+	constants are derived from the cube/ship values and the documented jump
+	heights rather than dumped from the game. They are close enough for the
+	pathfinder to solve with, and every macro is replay-verified before export.
+*/
+
+/// How long the robot keeps thrusting while the button is held after a jump.
+constexpr int robot_hold_frames = 32;
+
+Vehicle robot() {
+	Vehicle v;
+	v.type = VehicleType::Robot;
+
+	v.enter = +[](Player& p) {
+		if (p.prevPlayer().vehicle.type != VehicleType::Ball)
+			p.velocity = p.velocity / 2;
+
+		p.robotJumpFrame = -1000;
+	};
+
+	v.clamp = +[](Player& p) {
+		if (p.velocity < -810)
+			p.velocity = -810;
+
+		if (p.gravTop(p.innerHitbox()) >= p.gravCeiling())
+			p.dead = true;
+	};
+
+	v.update = +[](Player& p) {
+		static double accelerations[] = {
+			-2747.52,
+			-2794.1082,
+			-2786.4,
+			-2799.36,
+			-2799.36
+		};
+		p.acceleration = accelerations[p.speed];
+		p.rotation = 0;
+
+		bool jump = false;
+
+		if (p.grounded) {
+			if (p.input) {
+				jump = true;
+			} else {
+				p.setVelocity(0, true);
+			}
+			p.buffer = false;
+		}
+
+		if (jump) {
+			// A tap is weaker than a cube jump; holding makes up the difference.
+			static double jumpHeights[] = {
+				458.785382,
+				482.977374,
+				493.345382,
+				485.137382,
+				485.137382
+			};
+
+			p.setVelocity(jumpHeights[p.speed], p.prevPlayer().input);
+			p.grounded = false;
+			p.robotJumpFrame = p.frame;
+		} else if (p.input && p.velocity > 0 && p.frame - p.robotJumpFrame <= robot_hold_frames) {
+			// Sustained jump: gravity is cut while the button is held.
+			p.acceleration *= 0.4;
+		}
+	};
+
+	v.bounds = FLT_MAX;
+
+	return v;
+}
+
+Vehicle spider() {
+	Vehicle v;
+	v.type = VehicleType::Spider;
+
+	v.enter = +[](Player& p) {
+		if (p.prevPlayer().vehicle.type != VehicleType::Ball)
+			p.velocity = p.velocity / 2;
+	};
+
+	v.clamp = +[](Player& p) {
+		if (p.velocity < -810)
+			p.velocity = -810;
+		if (p.velocity > 810)
+			p.velocity = 810;
+	};
+
+	v.update = +[](Player& p) {
+		static double accelerations[] = {
+			-2747.52,
+			-2794.1082,
+			-2786.4,
+			-2799.36,
+			-2799.36
+		};
+		p.acceleration = accelerations[p.speed];
+		p.rotation = 0;
+
+		// A press while on a surface teleports to the nearest surface overhead
+		// and inverts gravity, instead of jumping.
+		bool press = p.input && (!p.prevPlayer().button || p.prevPlayer().buffer);
+
+		if (p.grounded && press) {
+			if (auto target = p.level->spiderTarget(p))
+				p.pos.y = *target;
+			else
+				p.pos.y = p.grav(p.gravCeiling()) - p.grav(p.size.y / 2);
+
+			p.upsideDown = !p.upsideDown;
+			p.setVelocity(0, true);
+			p.grounded = true;
+			p.buffer = false;
+			p.input = false;
+		} else if (p.grounded) {
+			p.setVelocity(0, true);
+			p.buffer = false;
+		}
+	};
+
+	v.bounds = 270;
+
+	return v;
+}
+
+Vehicle swing() {
+	Vehicle v;
+	v.type = VehicleType::Swing;
+
+	v.enter = +[](Player& p) {
+		VehicleType pv = p.prevPlayer().vehicle.type;
+		if (pv == VehicleType::Ufo || pv == VehicleType::Wave)
+			p.velocity = p.velocity / 4.0;
+		else
+			p.velocity = p.velocity / 2.0;
+	};
+
+	v.clamp = +[](Player& p) {
+		p.buffer = false;
+
+		p.velocity = std::clamp(p.velocity,
+			p.small ? -406.566 : -345.6,
+			p.small ? 508.248 : 432.0
+		);
+
+		if (p.gravTop(p) > p.gravCeiling()) {
+			if (p.velocity > 0)
+				p.setVelocity(0, false);
+			p.pos.y = p.grav(p.gravCeiling()) - p.grav(p.size.y / 2);
+		}
+	};
+
+	v.update = +[](Player& p) {
+		p.buffer = false;
+
+		// Every press flips gravity; there is no thrust and no need to be grounded.
+		if (p.button && !p.prevPlayer().button) {
+			p.upsideDown = !p.upsideDown;
+			p.velocity = -p.velocity;
+		}
+
+		p.acceleration = p.small ? -1643.5872 : -1397.0491;
+
+		if (p.grounded)
+			p.setVelocity(0, true);
+
+		rotateFly(p, 0.15f);
+	};
+
+	v.bounds = 300;
+
+	return v;
+}
+
 Vehicle Vehicle::from(VehicleType v) {
 	switch (v) {
 		case VehicleType::Cube:
@@ -389,5 +568,13 @@ Vehicle Vehicle::from(VehicleType v) {
 			return ufo();
 		case VehicleType::Wave:
 			return wave();
+		case VehicleType::Robot:
+			return robot();
+		case VehicleType::Spider:
+			return spider();
+		case VehicleType::Swing:
+			return swing();
 	}
+
+	return cube();
 }

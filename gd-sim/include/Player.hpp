@@ -66,7 +66,7 @@ struct Player : public Entity {
 
 	/// X-snapping. See Block.cpp for more information
 	struct {
-		Entity object;
+		Entity object{};
 		int playerFrame = 0;
 	} snapData;
 
@@ -76,6 +76,23 @@ struct Player : public Entity {
 
 	/// Some vehicles have coyote frames for valid inputs
 	unsigned int coyoteFrames;
+
+	/// Frame the current robot jump began on, used for its hold-to-jump-higher boost.
+	int robotJumpFrame;
+
+	/// Dash orbs lock the player to a fixed angle for as long as the button is held.
+	bool dashing;
+	float dashAngle;
+
+	/// Set by a dual portal; Level spawns the mirrored second player after the frame.
+	bool startDual;
+	float dualMirrorY;
+
+	/// Set by a single portal; Level drops the second player after the frame.
+	bool stopDual;
+
+	/// True for the mirrored second player of a dual, so state lookups use its own history.
+	bool second;
 
 	int speed;
 	int frame;
@@ -126,6 +143,9 @@ struct Player : public Entity {
 
 	Player const& prevPlayer() const;
 	Player const* nextPlayer() const;
+
+	/// Ends a dash orb lock, restoring normal physics.
+	void endDash();
 
 	/// Values relative to player gravity.
 	template <typename T>
