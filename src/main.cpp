@@ -6,6 +6,11 @@
 #include <UIBuilder.hpp>
 #include "pathfinder.hpp"
 #include <future>
+#ifdef GEODE_IS_ANDROID
+#include <Geode/loader/Dirs.hpp>
+#include <Geode/ui/Notification.hpp>
+#include <fstream>
+#endif
 
 using namespace geode::prelude;
 using namespace geode::utils::file;
@@ -51,12 +56,47 @@ public:
                 std::unordered_set {std::string("gdr2")}
             }});
 
+#ifdef GEODE_IS_ANDROID
+            // Android scoped storage makes the system file picker unusable here
+            // (camila314/pathfinder#10, geode-sdk/geode#1287): it returns a SAF
+            // content:// uri that resolves to "Failed to get file." and leaves a
+            // 0-byte macro behind. Skip the picker and write to the save dir.
+            (void)opts;
+
+            auto outPath = geode::dirs::getSaveDir() / "pathfinder_macro.gdr";
+            bool wrote = false;
+            if (!macro.empty()) {
+                std::ofstream out(outPath, std::ios::binary | std::ios::trunc);
+                if (out.is_open()) {
+                    out.write(reinterpret_cast<char const*>(macro.data()), static_cast<std::streamsize>(macro.size()));
+                    out.flush();
+                    wrote = out.good();
+                }
+            }
+
+            queueInMainThread([this, outPath, wrote] {
+                if (wrote) {
+                    Notification::create(
+                        fmt::format("Saved to {}", outPath.string()),
+                        NotificationIcon::Success, NOTIFICATION_LONG_TIME
+                    )->show();
+                    removeFromParentAndCleanup(true);
+                } else {
+                    Notification::create(
+                        fmt::format("Failed to write {}", outPath.string()),
+                        NotificationIcon::Error, NOTIFICATION_LONG_TIME
+                    )->show();
+                }
+            });
+            co_return;
+#else
             if (auto path = co_await pick(PickMode::SaveFile, opts); path.isOk() && path.unwrap().has_value()) {
                 (void)writeBinary(*path.unwrap(), macro);
                 queueInMainThread([this] {
                     removeFromParentAndCleanup(true);
                 });
             }
+#endif
         };
 
         Build<ButtonSprite>::create("Export", "bigFont.fnt", "GJ_button_01.png")
