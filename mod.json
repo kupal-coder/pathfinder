@@ -9,7 +9,7 @@
 	"geode": "5.9.0",
 	"name": "Path Finding",
 	"developer": "perjue",
-	"version": "v2.0.0",
+	"version": "v2.1.0",
 	"dependencies": {
 		"geode.node-ids": {
 			"id": "geode.node-ids",
@@ -23,8 +23,36 @@
 		]
 	},
 	"description": "Beat levels automatically!",
-	"tags": ["offline", "gameplay", "utility"],
+	"tags": [
+		"offline",
+		"gameplay",
+		"utility"
+	],
 	"links": {
 		"source": "https://github.com/kupal-coder/pathfinder"
+	},
+	"settings": {
+		"max-cps": {
+			"name": "Max CPS",
+			"description": "Highest clicks per second the generated macro may use. 240 physics frames per second, so 15 cps means presses are at least 16 frames apart.",
+			"type": "int",
+			"default": 15,
+			"min": 1,
+			"max": 60
+		},
+		"min-hold": {
+			"name": "Minimum click length",
+			"description": "Shortest press, in frames. 1 solves the most levels; raise it if your bot drops very short clicks.",
+			"type": "int",
+			"default": 1,
+			"min": 1,
+			"max": 12
+		},
+		"harden-timings": {
+			"name": "Harden timings",
+			"description": "Spend a few extra seconds making the macro survive a frame of timing slop. Strongly recommended if you use Click Between Frames.",
+			"type": "bool",
+			"default": true
+		}
 	}
 }

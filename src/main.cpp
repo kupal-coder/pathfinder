@@ -15,12 +15,25 @@
 using namespace geode::prelude;
 using namespace geode::utils::file;
 
+/**
+ * Click Between Frames applies inputs at their true sub-frame time instead of
+ * snapping them to a physics frame, and CBF Extrapolate builds on it. A macro
+ * whose timings only work frame-exact can therefore die with them enabled, so
+ * the search hardens its timings against a frame of slop when either is loaded.
+ */
+static bool clickBetweenFramesLoaded() {
+    auto loader = Loader::get();
+    return loader->isModLoaded("syzzi.click_between_frames")
+        || loader->isModLoaded("square3ang.cbfextrapolate");
+}
+
 class PathfinderNode : public CCLayerColor {
     std::atomic_bool m_stop = false;
     std::atomic<double> m_progress = 0;
     std::future<PathfindResult> m_result;
     std::string m_levelName;
     bool m_done = false;
+    bool m_cbf = false;
 public:
     static PathfinderNode* create(std::string const& levelName, std::string const& lvlString) {
         auto node = new PathfinderNode();
@@ -52,15 +65,30 @@ public:
             .string(result.completed ? "Solved!" : "Incomplete");
 
         Build(this).intoChildRecurseID<CCLabelBMFont>("percent")
-            .string(fmt::format("{:.2f}% - {} clicks", result.progress, result.clicks).c_str());
+            .string(fmt::format("{:.1f}% - {} clicks - {:.0f} cps",
+                result.progress, result.clicks, result.peakCps).c_str())
+            .scale(0.7f);
 
+        log::info("{:.1f}% - {} clicks - peak {:.0f} cps - {:.0f}% timing slack",
+            result.progress, result.clicks, result.peakCps, result.robustness);
+
+        // Unsupported objects are the most useful thing to surface, then how
+        // much timing slack the macro has.
+        std::string detail;
         if (!result.warnings.empty()) {
             log::warn("level uses mechanics the simulator cannot model:");
             for (auto const& w : result.warnings)
                 log::warn("  - {}", w);
 
+            detail = fmt::format("Unsupported: {}", result.warnings.front());
+        } else if (result.completed) {
+            detail = fmt::format("{:.0f}% timing slack{}",
+                result.robustness, m_cbf ? " (CBF safe)" : "");
+        }
+
+        if (!detail.empty()) {
             Build(this).intoChildRecurseID<CCLabelBMFont>("warning")
-                .string(fmt::format("Unsupported: {}", result.warnings.front()).c_str())
+                .string(detail.c_str())
                 .scale(0.32f);
         }
 
@@ -156,12 +184,28 @@ public:
 
         m_levelName = levelName;
 
-        m_result = std::async(std::launch::async, [lvlString, levelName, this]() -> PathfindResult {
+        m_cbf = clickBetweenFramesLoaded();
+
+        PathfindOptions options;
+        options.maxCps = (int)Mod::get()->getSettingValue<int64_t>("max-cps");
+        options.minHoldFrames = (int)Mod::get()->getSettingValue<int64_t>("min-hold");
+        options.harden = Mod::get()->getSettingValue<bool>("harden-timings");
+
+        // Hardening is what makes a macro survive CBF, so never skip it there.
+        if (m_cbf && !options.harden) {
+            log::info("Click Between Frames is loaded, hardening timings anyway");
+            options.harden = true;
+        }
+
+        log::info("searching with max {} cps, min hold {} frames, harden {}",
+            options.maxCps, options.minHoldFrames, options.harden);
+
+        m_result = std::async(std::launch::async, [lvlString, levelName, options, this]() -> PathfindResult {
             try {
                 return pathfind(lvlString, m_stop, [this](double progress) {
                     if (m_progress < progress)
                         m_progress = progress;
-                }, levelName);
+                }, levelName, options);
             } catch (std::exception& e) {
                 log::error("{}", e.what());
                 PathfindResult failed;

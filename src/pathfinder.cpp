@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <chrono>
 #include <random>
 #include <thread>
 
@@ -66,7 +67,11 @@ bool flying(VehicleType v) {
 }
 
 /// Builds one plausible click schedule for the next `horizon` frames.
-Schedule sampleSchedule(std::mt19937& rng, uint32_t start, int horizon, VehicleType vehicle, int aggression) {
+/// `minPeriod` is the shortest allowed press-to-press distance (the CPS cap) and
+/// `earliest` is the first frame a press may happen on, so the cap still holds
+/// across the boundary between two rounds.
+Schedule sampleSchedule(std::mt19937& rng, uint32_t start, int horizon, VehicleType vehicle,
+                        int aggression, int minPeriod, int minHold, uint32_t earliest) {
 	Schedule out;
 	std::uniform_int_distribution<int> pick(0, 99);
 
@@ -86,10 +91,15 @@ Schedule sampleSchedule(std::mt19937& rng, uint32_t start, int horizon, VehicleT
 	// More aggression means denser, twitchier input for the parts that need it.
 	gapMax = std::max(gapMin + 1, gapMax - aggression * 8);
 
+	// Respect the click rate cap: a press and the gap after it have to add up to
+	// at least one full period.
+	holdMin = std::max(holdMin, minHold);
+	holdMax = std::max(holdMax, holdMin);
+
 	std::uniform_int_distribution<int> gapDist(gapMin, gapMax);
 	std::uniform_int_distribution<int> holdDist(holdMin, holdMax);
 
-	uint32_t f = start + (uint32_t)gapDist(rng);
+	uint32_t f = std::max<uint32_t>(start + (uint32_t)gapDist(rng), earliest);
 	std::uniform_int_distribution<int> longHold(40, 400);
 
 	while (f < start + horizon) {
@@ -105,13 +115,21 @@ Schedule sampleSchedule(std::mt19937& rng, uint32_t start, int horizon, VehicleT
 		if (pick(rng) < 14)
 			hold += longHold(rng);
 
-		out.push_back(f);
+		hold = std::max(hold, minHold);
+
+		uint32_t pressAt = f;
+		out.push_back(pressAt);
 		f += hold;
 		if (f >= start + horizon)
 			break;
 
 		out.push_back(f);
-		f += gapDist(rng);
+
+		// next press is a full period after this one at the earliest
+		uint32_t nextPress = f + (uint32_t)gapDist(rng);
+		if (nextPress < pressAt + (uint32_t)minPeriod)
+			nextPress = pressAt + (uint32_t)minPeriod;
+		f = nextPress;
 	}
 
 	return out;
@@ -176,6 +194,109 @@ Level materialise(std::string const& lvlString, Schedule const& plan, uint32_t u
 	return lvl;
 }
 
+struct PlanRun {
+	bool completed = false;
+	uint32_t endFrame = 0;
+};
+
+/// Replays a plan on a clean level and reports whether it reaches the end.
+PlanRun planRun(std::string const& lvlString, Schedule const& plan, float endX, uint32_t limit) {
+	Level lvl(lvlString);
+	bool press = false;
+	size_t next = 0;
+
+	while (!lvl.anyDead() && lvl.latestState().pos.x < endX && (uint32_t)lvl.currentFrame() < limit) {
+		uint32_t frame = (uint32_t)lvl.currentFrame();
+		while (next < plan.size() && plan[next] <= frame) {
+			press = !press;
+			++next;
+		}
+		lvl.runFrame(press);
+	}
+
+	PlanRun out;
+	out.completed = !lvl.anyDead() && lvl.latestState().pos.x >= endX;
+	out.endFrame = (uint32_t)lvl.currentFrame();
+	return out;
+}
+
+bool planCompletes(std::string const& lvlString, Schedule const& plan, float endX, uint32_t limit) {
+	return planRun(lvlString, plan, endX, limit).completed;
+}
+
+/// Shifts every toggle by up to `amount` frames in either direction.
+Schedule jitterPlan(Schedule const& plan, std::mt19937& rng, int amount) {
+	std::uniform_int_distribution<int> shift(-amount, amount);
+	Schedule out;
+	out.reserve(plan.size());
+	for (auto f : plan)
+		out.push_back((uint32_t)std::max<int>(1, (int)f + shift(rng)));
+	std::sort(out.begin(), out.end());
+	return out;
+}
+
+/// Shifts every toggle by the same amount.
+Schedule shiftPlan(Schedule const& plan, int by) {
+	Schedule out;
+	out.reserve(plan.size());
+	for (auto f : plan)
+		out.push_back((uint32_t)std::max<int>(1, (int)f + by));
+	return out;
+}
+
+/// How many of the perturbed replays still finish. A macro that only works with
+/// perfect frame timing will not survive Click Between Frames, which places
+/// inputs at their true sub-frame time.
+int robustnessTrials(std::string const& lvlString, Schedule const& plan, float endX,
+                     uint32_t limit, unsigned threads, int randomTrials) {
+	std::vector<Schedule> trials;
+	trials.push_back(plan);
+	trials.push_back(shiftPlan(plan, 1));
+	trials.push_back(shiftPlan(plan, -1));
+
+	std::mt19937 rng(0xC0FFEE);
+	for (int i = 0; i < randomTrials; ++i)
+		trials.push_back(jitterPlan(plan, rng, 1));
+
+	std::vector<char> ok(trials.size(), 0);
+	auto work = [&](unsigned tid) {
+		for (size_t i = tid; i < trials.size(); i += threads)
+			ok[i] = planCompletes(lvlString, trials[i], endX, limit) ? 1 : 0;
+	};
+
+	if (threads <= 1) {
+		work(0);
+	} else {
+		std::vector<std::thread> pool;
+		for (unsigned t = 0; t < threads; ++t)
+			pool.emplace_back(work, t);
+		for (auto& t : pool)
+			t.join();
+	}
+
+	int survived = 0;
+	for (auto v : ok)
+		survived += v;
+	return survived;
+}
+
+/// Highest number of presses inside any one second window.
+float peakCps(Schedule const& plan) {
+	// toggles alternate, so every other one starting from the first is a press
+	std::vector<uint32_t> presses;
+	for (size_t i = 0; i < plan.size(); i += 2)
+		presses.push_back(plan[i]);
+
+	float peak = 0;
+	for (size_t i = 0; i < presses.size(); ++i) {
+		size_t count = 0;
+		for (size_t j = i; j < presses.size() && presses[j] < presses[i] + 240; ++j)
+			++count;
+		peak = std::max(peak, (float)count);
+	}
+	return peak;
+}
+
 /// Names for the object ids that change how a level plays. Anything else that is
 /// unrecognised is almost always decoration, and is only counted.
 std::string describeObject(int id) {
@@ -235,7 +356,8 @@ PathfindResult pathfind(
 	std::string const& lvlString,
 	std::atomic_bool& stop,
 	std::function<void(double)> callback,
-	std::string const& levelName
+	std::string const& levelName,
+	PathfindOptions const& options
 ) {
 	PathfindResult result;
 
@@ -248,10 +370,15 @@ PathfindResult pathfind(
 		return result;
 	}
 
-	unsigned threadCount = std::thread::hardware_concurrency();
+	unsigned threadCount = options.threads ? options.threads : std::thread::hardware_concurrency();
 	if (threadCount == 0)
 		threadCount = 1;
 	threadCount = std::min<unsigned>(threadCount, max_threads);
+
+	// 240 physics frames per second, so 15 cps is a press every 16 frames.
+	int const cps = std::clamp(options.maxCps, 1, 60);
+	int const minPeriod = std::max(1, 240 / cps);
+	int const minHold = std::max(1, options.minHoldFrames);
 
 	// Deterministic: the same level always searches the same way.
 	std::seed_seq seed{ (uint32_t)std::hash<std::string>{}(lvlString), 0x9e3779b9u };
@@ -268,6 +395,7 @@ PathfindResult pathfind(
 	int stalls = 0;
 	int aggression = 0;
 	uint32_t backoff = 240;
+	uint32_t lastPress = 0;
 
 	while (!stop) {
 		if (current.latestState().pos.x >= endX)
@@ -285,12 +413,15 @@ PathfindResult pathfind(
 
 		// "click here, then keep holding" - the shape every held mechanic needs
 		// (dash orbs, robot boosts, long ship thrusts).
+		uint32_t const earliest = lastPress + (uint32_t)minPeriod;
+
 		std::uniform_int_distribution<int> holdPoint(0, horizon_frames - 1);
 		for (int i = 0; i < 12; ++i)
-			candidates.push_back({ start + (uint32_t)holdPoint(rng) });
+			candidates.push_back({ std::max<uint32_t>(start + (uint32_t)holdPoint(rng), earliest) });
 
 		for (int i = 0; i < candidateCount; ++i)
-			candidates.push_back(sampleSchedule(rng, start, horizon_frames, vehicle, aggression));
+			candidates.push_back(sampleSchedule(rng, start, horizon_frames, vehicle,
+				aggression, minPeriod, minHold, earliest));
 
 		// ---- evaluate in parallel
 		std::vector<Outcome> outcomes(candidates.size());
@@ -333,6 +464,11 @@ PathfindResult pathfind(
 					f = (uint32_t)std::max<int>(nf, (int)start);
 				}
 				std::sort(s.begin(), s.end());
+
+				// keep presses at least one period apart after jittering
+				for (size_t k = 2; k < s.size(); k += 2)
+					if (s[k] < s[k - 2] + (uint32_t)minPeriod)
+						s[k] = s[k - 2] + (uint32_t)minPeriod;
 				tweaks.push_back(std::move(s));
 			}
 
@@ -380,9 +516,15 @@ PathfindResult pathfind(
 		}
 
 		if (commitTo > start + min_commit) {
-			for (auto f : sched)
-				if (f < commitTo)
-					plan.push_back(f);
+			bool pressState = press;
+			for (auto f : sched) {
+				if (f >= commitTo)
+					break;
+				plan.push_back(f);
+				pressState = !pressState;
+				if (pressState)
+					lastPress = f;      // this toggle turned the button on
+			}
 
 			bool alive = advance(current, press, sched, commitTo, endX);
 
@@ -438,16 +580,103 @@ PathfindResult pathfind(
 	// An empty plan is a legitimate result: some sections (and some whole
 	// levels) are cleared by holding nothing at all.
 	bool const solved = current.latestState().pos.x >= endX;
-	Schedule const winner = solved ? plan : bestPlan;
+	Schedule winner = solved ? plan : bestPlan;
+
+	uint32_t const planLimit = std::min<uint32_t>(
+		std::max<uint32_t>((winner.empty() ? 0u : winner.back()) + horizon_frames * 4u, 2000u),
+		3'000'000u);
+
+	// ---------------------------------------------------------- hardening
+	// A macro that only survives with perfect frame timing will die under Click
+	// Between Frames, which places each input at its true sub-frame time. Build
+	// a set of perturbed replays, and if any of them fail, nudge the toggles
+	// around the point of failure until they stop failing.
+	int const totalTrials = 8;
+	int survived = 0;
+
+	if (solved) {
+		auto measure = [&](Schedule const& s) {
+			return robustnessTrials(lvlString, s, endX, planLimit, threadCount, totalTrials - 3);
+		};
+
+		survived = measure(winner);
+
+		if (options.harden && survived < totalTrials && !winner.empty()) {
+			auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+			std::mt19937 hrng(0xBEEFu);
+			std::uniform_int_distribution<int> delta(-3, 3);
+			int fruitless = 0;
+
+			while (survived < totalTrials && !stop && fruitless < 5
+				&& std::chrono::steady_clock::now() < deadline) {
+
+				// Aim at wherever the timing actually breaks. If this probe
+				// happens to survive, pick a spot at random instead so a
+				// different part of the run gets attention next time.
+				Schedule probe = jitterPlan(winner, hrng, 1);
+				auto run = planRun(lvlString, probe, endX, planLimit);
+
+				uint32_t focus;
+				if (!run.completed) {
+					focus = run.endFrame;
+				} else {
+					std::uniform_int_distribution<size_t> anyToggle(0, winner.size() - 1);
+					focus = winner[anyToggle(hrng)];
+				}
+
+				std::vector<Schedule> mutations;
+				for (unsigned i = 0; i < threadCount * 3; ++i) {
+					Schedule m = winner;
+					bool touched = false;
+					for (auto& t : m) {
+						if (t + 400 < focus || t > focus)
+							continue;
+						t = (uint32_t)std::max(1, (int)t + delta(hrng));
+						touched = true;
+					}
+					if (!touched)
+						continue;
+
+					std::sort(m.begin(), m.end());
+					for (size_t k = 2; k < m.size(); k += 2)
+						if (m[k] < m[k - 2] + (uint32_t)minPeriod)
+							m[k] = m[k - 2] + (uint32_t)minPeriod;
+					mutations.push_back(std::move(m));
+				}
+
+				int bestScore = survived;
+				Schedule bestMutation;
+				for (auto& m : mutations) {
+					if (stop || std::chrono::steady_clock::now() >= deadline)
+						break;
+					int sc = measure(m);
+					if (sc > bestScore) {
+						bestScore = sc;
+						bestMutation = m;
+					}
+				}
+
+				if (bestMutation.empty()) {
+					++fruitless;
+				} else {
+					winner = bestMutation;
+					survived = bestScore;
+					fruitless = 0;
+				}
+			}
+		}
+
+		result.robustness = 100.0f * (float)survived / (float)totalTrials;
+	}
+
+	result.peakCps = peakCps(winner);
 
 	// Replay the plan from frame 0 on a clean level. Everything exported comes
 	// from this replay, so what is written out is exactly what was verified.
 	Level replay(lvlString);
 	bool rp = false;
 	size_t next = 0;
-	uint32_t const limit = std::min<uint32_t>(
-		std::max<uint32_t>((winner.empty() ? 0u : winner.back()) + horizon_frames * 4u, 2000u),
-		3'000'000u);
+	uint32_t const limit = planLimit;
 
 	while (!replay.anyDead()
 		&& replay.latestState().pos.x < endX

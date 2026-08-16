@@ -35,3 +35,18 @@ quietly producing a macro that dies.
 
 Every exported macro is replayed from the first frame inside the simulator
 before it is written, so a macro that says Solved really does reach the end.
+
+# Click Between Frames
+
+**Click Between Frames** and **CBF Extrapolate** are detected automatically.
+Those mods place each input at its true sub-frame time, so macros that rely on
+frame-exact timing can die with them enabled. When either is installed the
+timings are hardened: the plan is re-replayed with every input shifted a frame
+in each direction and jittered, and the timings are adjusted until it survives.
+The result screen shows the resulting **timing slack**.
+
+# Settings
+
+* **Max CPS** - default 15, the fastest the macro is allowed to click
+* **Minimum click length** - shortest press in frames, default 1
+* **Harden timings** - always on when CBF is installed

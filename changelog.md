@@ -1,3 +1,31 @@
+# v2.1.0
+
+## Click Between Frames support
+ * Detects **Click Between Frames** (`syzzi.click_between_frames`) and
+   **CBF Extrapolate** (`square3ang.cbfextrapolate`). Those mods apply inputs at
+   their true sub-frame time, so a macro that only works frame-exact can die
+   with them on.
+ * New hardening pass: after a solution is found, the plan is replayed with
+   every input shifted a frame early, a frame late, and with random per-input
+   jitter. If any of those fail, the timings around the failure are nudged until
+   they stop failing. Hardening is forced on when CBF is installed.
+ * The result screen now reports **timing slack** - the share of jittered
+   replays that still finish. 100% means every input can land a frame early or
+   late and the macro still works.
+
+## Click rate
+ * New **Max CPS** setting, default **15**. Presses are kept at least
+   240/cps frames apart during the search, not filtered afterwards, so the cap
+   holds across the whole macro including round boundaries.
+ * New **Minimum click length** setting (default 1 frame) and **Harden timings**
+   toggle.
+ * Peak clicks per second is measured over a one second window and shown.
+
+## Measured
+ * 13 test levels, all solved and verified. Hardening lifts timing slack from
+   38% to 100% on tight cube chains and 38% to 75% on a narrow ship corridor,
+   for about 0.3s of extra work.
+
 # v2.0.0
 
 Large rewrite of the simulator and the search. Renamed to **Path Finding**.
