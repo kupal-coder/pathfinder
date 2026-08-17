@@ -1,6 +1,9 @@
 # beta 25
 
 - Search now runs against Geometry Dash's exact runtime PlayLayer and checkpoint state
+- Cooperative six-state beam search with runtime-state deduplication, adaptive horizons, and a 4 ms UI frame budget
+- Platformer jump/left/right inputs and reverse-safe progress scoring
+- Bundled in-game acceptance suite with machine-readable reports
 - Dual-player search and all runtime vehicle/object/trigger behavior, including 2.2
 - Double fresh-runtime replay verification with deterministic replay seeds and trace hashes
 - Mismatches log P1/P2, collision object transform, player position, and velocity and are never exported

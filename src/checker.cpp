@@ -8,6 +8,7 @@
 #include <bit>
 #include <deque>
 #include <limits>
+#include <memory>
 #include <random>
 #include <unordered_set>
 
@@ -199,6 +200,7 @@ RuntimeSearchTask pathfindInGame(
         ~LayerLifetime() { layer->release(); }
     } layerLifetime {playLayer};
     playLayer->setVisible(false);
+
     const auto configuredSeed = Mod::get()->getSettingValue<int64_t>("search-seed");
     const uint32_t runtimeSeed = configuredSeed == 0
         ? (std::random_device{}() & 0x7fffffffu)
@@ -206,15 +208,15 @@ RuntimeSearchTask pathfindInGame(
     log::info("Pathfinder runtime seed: {}", runtimeSeed);
     setRuntimeSeed(playLayer, runtimeSeed);
     playLayer->resetLevel();
-
     CaptureGuard capture;
+
     constexpr float physicsStep = 1.f / 240.f;
-    uint32_t horizon = 120;
     constexpr uint32_t minHorizon = 60;
     constexpr uint32_t maxHorizon = 240;
-    constexpr uint32_t commitFrames = 120;
-    constexpr int trialsPerChunk = 64;
-    constexpr int maxChunks = 2400;
+    constexpr size_t beamWidth = 6;
+    constexpr int branchesPerNode = 12;
+    constexpr int maxGenerations = 4800;
+    uint32_t horizon = 120;
 
     struct Event {
         uint32_t frame;
@@ -227,66 +229,41 @@ RuntimeSearchTask pathfindInGame(
         bool left = false;
         bool right = false;
     };
-    struct SavedPoint {
-        CheckpointObject* checkpoint;
-        uint32_t frame;
+    using CheckpointPtr = std::shared_ptr<CheckpointObject>;
+    struct Node {
+        CheckpointPtr checkpoint;
+        uint32_t frame = 0;
         Buttons p1;
         Buttons p2;
-        size_t inputCount;
-    };
-    struct Trial {
-        std::vector<Event> events;
-        uint32_t survived = 0;
-        float score = -std::numeric_limits<float>::infinity();
+        std::vector<Event> path;
+        float score = 0;
         uint64_t stateHash = 0;
-        bool completed = false;
     };
 
-    std::vector<SavedPoint> history;
-    struct CheckpointLifetime {
-        std::vector<SavedPoint>& points;
-        ~CheckpointLifetime() {
-            for (auto& point : points)
-                point.checkpoint->release();
-        }
-    } checkpointLifetime {history};
-    std::vector<Event> committed;
-    auto savePoint = [&](uint32_t frame, Buttons p1, Buttons p2) {
+    auto captureCheckpoint = [&]() -> CheckpointPtr {
         auto checkpoint = playLayer->createCheckpoint();
         checkpoint->retain();
-        history.push_back({checkpoint, frame, p1, p2, committed.size()});
-        constexpr size_t maxRetainedCheckpoints = 256;
-        if (history.size() > maxRetainedCheckpoints) {
-            history.front().checkpoint->release();
-            history.erase(history.begin());
-        }
+        return {checkpoint, [](CheckpointObject* value) { value->release(); }};
     };
-    savePoint(0, {}, {});
-
-    auto restore = [&](SavedPoint const& point, Buttons& liveP1, Buttons& liveP2) {
-        // Input state is not part of PlayerCheckpoint, so normalize every
-        // gameplay button before loading the object/trigger snapshot.
+    auto restore = [&](Node const& node, Buttons& p1, Buttons& p2) {
         for (uint8_t button = 1; button <= 3; ++button) {
             playLayer->handleButton(false, button, false);
             playLayer->handleButton(false, button, true);
         }
-        playLayer->loadFromCheckpoint(point.checkpoint);
+        playLayer->loadFromCheckpoint(node.checkpoint.get());
         auto apply = [&](Buttons const& buttons, bool player2) {
             if (buttons.jump) playLayer->handleButton(true, 1, player2);
             if (buttons.left) playLayer->handleButton(true, 2, player2);
             if (buttons.right) playLayer->handleButton(true, 3, player2);
         };
-        apply(point.p1, false);
-        apply(point.p2, true);
-        liveP1 = point.p1;
-        liveP2 = point.p2;
-        s_collision.died = false;
-        s_collision.objectID = 0;
-        s_collision.position = CCPointZero;
+        apply(node.p1, false);
+        apply(node.p2, true);
+        p1 = node.p1;
+        p2 = node.p2;
+        s_collision = {};
+        s_collision.active = true;
     };
 
-    std::mt19937 rng(runtimeSeed ^ 0x9e3779b9u);
-    std::uniform_real_distribution<double> chance(0., 1.);
     auto runtimeStateHash = [&] {
         uint64_t hash = 1469598103934665603ull;
         auto mix = [&](uint64_t value) {
@@ -310,8 +287,7 @@ RuntimeSearchTask pathfindInGame(
         mix(playLayer->m_commandIndex);
         mix(playLayer->m_randomSeed);
         for (auto* object : playLayer->m_activeObjects) {
-            if (!object)
-                continue;
+            if (!object) continue;
             mix(static_cast<uint32_t>(object->m_uniqueID));
             mix(std::bit_cast<uint32_t>(object->getPositionX()));
             mix(std::bit_cast<uint32_t>(object->getPositionY()));
@@ -320,203 +296,174 @@ RuntimeSearchTask pathfindInGame(
         }
         return hash;
     };
-    bool solved = false;
 
-    for (int chunk = 0; chunk < maxChunks && !stop && !solved; ++chunk) {
-        auto const base = history.back();
-        auto ticks = pathfinder::fixedTickFrames(
-            base.frame + 1, base.frame + horizon, physicsStep
-        );
-        Trial best;
+    std::mt19937 rng(runtimeSeed ^ 0x9e3779b9u);
+    std::uniform_real_distribution<double> chance(0., 1.);
+    std::vector<Node> frontier {{captureCheckpoint(), 0, {}, {}, {}, 0, 0}};
+    std::vector<Event> solvedPath;
+
+    for (int generation = 0;
+         generation < maxGenerations && !stop && solvedPath.empty();
+         ++generation) {
+        std::vector<Node> candidates;
         std::unordered_set<uint64_t> seenStates;
+        size_t deadBranches = 0;
+        size_t attemptedBranches = 0;
 
-        for (int trialIndex = 0; trialIndex < trialsPerChunk && !stop; ++trialIndex) {
-            Trial trial;
-            struct Decision {
-                uint32_t frame;
-                bool p1;
-                bool p2;
-                int8_t p1Direction;
-                int8_t p2Direction;
-            };
-            std::vector<Decision> decisions;
-            decisions.reserve(ticks.size());
-            for (auto frame : ticks) {
-                decisions.push_back({
-                    frame,
-                    trialIndex != 0 && chance(rng) < .10,
-                    trialIndex != 0 && chance(rng) < .10,
-                    trialIndex != 0 && chance(rng) < .06 ? static_cast<int8_t>(rng() % 3) : static_cast<int8_t>(-1),
-                    trialIndex != 0 && chance(rng) < .06 ? static_cast<int8_t>(rng() % 3) : static_cast<int8_t>(-1)
-                });
+        for (auto const& base : frontier) {
+            auto ticks = pathfinder::fixedTickFrames(
+                base.frame + 1, base.frame + horizon, physicsStep
+            );
+            for (int branch = 0; branch < branchesPerNode && !stop; ++branch) {
+                ++attemptedBranches;
+                struct Decision {
+                    uint32_t frame;
+                    bool p1Jump;
+                    bool p2Jump;
+                    int8_t p1Direction;
+                    int8_t p2Direction;
+                };
+                std::vector<Decision> decisions;
+                decisions.reserve(ticks.size());
+                for (auto frame : ticks) {
+                    decisions.push_back({
+                        frame,
+                        branch != 0 && chance(rng) < .10,
+                        branch != 0 && chance(rng) < .10,
+                        branch != 0 && chance(rng) < .06
+                            ? static_cast<int8_t>(rng() % 3) : static_cast<int8_t>(-1),
+                        branch != 0 && chance(rng) < .06
+                            ? static_cast<int8_t>(rng() % 3) : static_cast<int8_t>(-1)
+                    });
+                }
+
+                Buttons p1;
+                Buttons p2;
+                restore(base, p1, p2);
+                std::vector<Event> events;
+                size_t decisionIndex = 0;
+                uint32_t releaseP1 = 0;
+                uint32_t releaseP2 = 0;
+                bool completed = false;
+
+                auto send = [&](uint32_t frame, uint8_t button, bool player2,
+                                bool down, bool& live) {
+                    if (live == down) return;
+                    playLayer->handleButton(down, button, player2);
+                    live = down;
+                    events.push_back({frame, button, player2, down});
+                };
+                auto jumpDecision = [&](uint32_t frame, bool player2, bool selected,
+                                        PlayerObject* player, Buttons& buttons,
+                                        uint32_t& releaseFrame) {
+                    const bool action = player->m_isSpider || player->m_isSwing;
+                    const bool harmless = player->m_isRobot || player->m_isBall ||
+                        (!player->m_isShip && !player->m_isBird && !player->m_isDart &&
+                         !player->m_isSpider && !player->m_isSwing);
+                    const bool pulse = action ? selected : (branch == 1 && harmless);
+                    if (pulse) {
+                        send(frame, 1, player2, false, buttons.jump);
+                        send(frame, 1, player2, true, buttons.jump);
+                        releaseFrame = frame + 1;
+                    } else if (selected) {
+                        send(frame, 1, player2, !buttons.jump, buttons.jump);
+                    }
+                };
+                auto directionDecision = [&](uint32_t frame, bool player2,
+                                             int8_t direction, PlayerObject* player,
+                                             Buttons& buttons) {
+                    if (!player->m_isPlatformer || direction < 0) return;
+                    send(frame, 2, player2, direction == 1, buttons.left);
+                    send(frame, 3, player2, direction == 2, buttons.right);
+                };
+
+                for (uint32_t offset = 1; offset <= horizon; ++offset) {
+                    const uint32_t frame = base.frame + offset;
+                    if (releaseP1 == frame) {
+                        send(frame, 1, false, false, p1.jump);
+                        releaseP1 = 0;
+                    }
+                    if (releaseP2 == frame) {
+                        send(frame, 1, true, false, p2.jump);
+                        releaseP2 = 0;
+                    }
+                    if (decisionIndex < decisions.size() &&
+                        decisions[decisionIndex].frame == frame) {
+                        auto const decision = decisions[decisionIndex++];
+                        jumpDecision(frame, false, decision.p1Jump,
+                            playLayer->m_player1, p1, releaseP1);
+                        jumpDecision(frame, true, decision.p2Jump,
+                            playLayer->m_player2, p2, releaseP2);
+                        directionDecision(frame, false, decision.p1Direction,
+                            playLayer->m_player1, p1);
+                        directionDecision(frame, true, decision.p2Direction,
+                            playLayer->m_player2, p2);
+                    }
+                    playLayer->update(physicsStep);
+                    if (playLayer->m_hasCompletedLevel) {
+                        completed = true;
+                        break;
+                    }
+                    if (s_collision.died) break;
+                }
+
+                if (completed) {
+                    solvedPath = base.path;
+                    solvedPath.insert(solvedPath.end(), events.begin(), events.end());
+                } else if (!s_collision.died) {
+                    const auto hash = runtimeStateHash();
+                    if (seenStates.insert(hash).second) {
+                        Node candidate;
+                        candidate.checkpoint = captureCheckpoint();
+                        candidate.frame = base.frame + horizon;
+                        candidate.p1 = p1;
+                        candidate.p2 = p2;
+                        candidate.path = base.path;
+                        candidate.path.insert(candidate.path.end(), events.begin(), events.end());
+                        candidate.score = playLayer->getCurrentPercent() * 1000.f +
+                            static_cast<float>(candidate.frame) * .001f;
+                        candidate.stateHash = hash;
+                        candidates.push_back(std::move(candidate));
+                    }
+                } else {
+                    ++deadBranches;
+                }
+
+                co_yield true;
+                if (!solvedPath.empty()) break;
             }
-
-            Buttons liveP1;
-            Buttons liveP2;
-            restore(base, liveP1, liveP2);
-            size_t decisionIndex = 0;
-            uint32_t releaseP1 = 0;
-            uint32_t releaseP2 = 0;
-
-            auto send = [&](uint32_t frame, uint8_t button, bool player2, bool down, bool& live) {
-                if (live == down)
-                    return;
-                playLayer->handleButton(down, button, player2);
-                live = down;
-                trial.events.push_back({frame, button, player2, down});
-            };
-
-            auto applyDecision = [&](
-                uint32_t frame,
-                bool player2,
-                bool selected,
-                PlayerObject* player,
-                Buttons& live,
-                uint32_t& releaseFrame
-            ) {
-                const bool actionMode = player->m_isSpider || player->m_isSwing;
-                const bool harmlessSpam = player->m_isRobot || player->m_isBall ||
-                    (!player->m_isShip && !player->m_isBird && !player->m_isDart &&
-                     !player->m_isSpider && !player->m_isSwing);
-
-                // The dense candidate exists only in harmless modes. Spider
-                // and swing continue using random selected actions, even when
-                // this is trial one, because every press changes their state.
-                const bool pulse = actionMode ? selected
-                    : (trialIndex == 1 && harmlessSpam);
-                if (pulse) {
-                    // A pulse is one press on a 70 Hz boundary followed by a
-                    // release on the next physics frame. If a portal changed
-                    // mode while held, normalize the old hold first.
-                    send(frame, 1, player2, false, live.jump);
-                    send(frame, 1, player2, true, live.jump);
-                    releaseFrame = frame + 1;
-                } else if (selected) {
-                    // Ship/UFO/wave and ordinary non-spam candidates need real
-                    // holds, so decisions toggle rather than pulse.
-                    send(frame, 1, player2, !live.jump, live.jump);
-                }
-            };
-
-            for (uint32_t offset = 1; offset <= horizon; ++offset) {
-                const uint32_t frame = base.frame + offset;
-                if (releaseP1 == frame) {
-                    send(frame, 1, false, false, liveP1.jump);
-                    releaseP1 = 0;
-                }
-                if (releaseP2 == frame) {
-                    send(frame, 1, true, false, liveP2.jump);
-                    releaseP2 = 0;
-                }
-
-                if (decisionIndex < decisions.size() && decisions[decisionIndex].frame == frame) {
-                    auto const decision = decisions[decisionIndex++];
-                    applyDecision(frame, false, decision.p1, playLayer->m_player1, liveP1, releaseP1);
-                    applyDecision(frame, true, decision.p2, playLayer->m_player2, liveP2, releaseP2);
-
-                    auto applyDirection = [&](bool player2, int8_t direction, PlayerObject* player, Buttons& live) {
-                        if (!player->m_isPlatformer || direction < 0)
-                            return;
-                        const bool wantLeft = direction == 1;
-                        const bool wantRight = direction == 2;
-                        send(frame, 2, player2, wantLeft, live.left);
-                        send(frame, 3, player2, wantRight, live.right);
-                    };
-                    applyDirection(false, decision.p1Direction, playLayer->m_player1, liveP1);
-                    applyDirection(true, decision.p2Direction, playLayer->m_player2, liveP2);
-                }
-
-                playLayer->update(physicsStep);
-                trial.survived = offset;
-                if (playLayer->m_hasCompletedLevel) {
-                    trial.completed = true;
-                    break;
-                }
-                if (s_collision.died)
-                    break;
-            }
-
-            trial.stateHash = runtimeStateHash();
-            if (!trial.completed && !seenStates.insert(trial.stateHash).second)
-                continue;
-
-            // Survival dominates, while the game's own progress calculation
-            // breaks ties. Unlike raw X this also works after reverse portals,
-            // teleports, dual splits, and in platformer levels.
-            trial.score = static_cast<float>(trial.survived) * 100000.f +
-                playLayer->getCurrentPercent() * 1000.f;
-            if (trial.completed || trial.score > best.score)
-                best = std::move(trial);
-            if (best.completed)
-                break;
-            co_yield true;
+            if (!solvedPath.empty()) break;
         }
 
-        if (stop)
-            break;
-
-        if (best.completed) {
-            committed.insert(committed.end(), best.events.begin(), best.events.end());
-            solved = true;
-            break;
-        }
-
-        // Never commit the collision frame. If every branch dies immediately,
-        // backtrack one exact game checkpoint and explore a different branch.
-        const uint32_t safeFrames = best.survived > 2 ? best.survived - 2 : 0;
-        const uint32_t advance = std::min(commitFrames, safeFrames);
-        if (advance < 8) {
+        if (!solvedPath.empty() || stop) break;
+        if (candidates.empty()) {
             horizon = std::max(minHorizon, horizon / 2);
-            if (history.size() > 1) {
-                history.back().checkpoint->release();
-                history.pop_back();
-                committed.resize(history.back().inputCount);
-            }
             continue;
         }
 
-        Buttons liveP1;
-        Buttons liveP2;
-        restore(base, liveP1, liveP2);
-        size_t eventIndex = 0;
-        for (uint32_t offset = 1; offset <= advance; ++offset) {
-            const uint32_t frame = base.frame + offset;
-            while (eventIndex < best.events.size() && best.events[eventIndex].frame == frame) {
-                auto const event = best.events[eventIndex++];
-                playLayer->handleButton(event.down, event.button, event.player2);
-                auto& buttons = event.player2 ? liveP2 : liveP1;
-                auto& state = event.button == 1 ? buttons.jump :
-                    (event.button == 2 ? buttons.left : buttons.right);
-                state = event.down;
-                committed.push_back(event);
-            }
-            playLayer->update(physicsStep);
-            if (s_collision.died)
-                break;
-        }
-        if (s_collision.died)
-            continue;
+        std::sort(candidates.begin(), candidates.end(), [](Node const& a, Node const& b) {
+            return a.score > b.score;
+        });
+        if (candidates.size() > beamWidth)
+            candidates.resize(beamWidth);
+        frontier = std::move(candidates);
 
-        savePoint(base.frame + advance, liveP1, liveP2);
-        if (best.survived >= horizon)
+        if (deadBranches * 2 > attemptedBranches)
+            horizon = std::max(minHorizon, horizon / 2);
+        else
             horizon = std::min(maxHorizon, horizon + 30);
-        else if (best.survived < horizon / 2)
-            horizon = std::max(minHorizon, horizon / 2);
-        if (progress)
-            progress(std::clamp<double>(playLayer->getCurrentPercent(), 0., 100.));
+        if (progress && !frontier.empty())
+            progress(std::clamp<double>(frontier.front().score / 1000., 0., 100.));
     }
 
+    if (solvedPath.empty())
+        co_return std::vector<uint8_t>{};
+    std::stable_sort(solvedPath.begin(), solvedPath.end(), [](auto const& a, auto const& b) {
+        return a.frame < b.frame;
+    });
     PathfinderReplay output;
     output.seed = static_cast<int>(runtimeSeed);
-    if (solved) {
-        std::stable_sort(committed.begin(), committed.end(), [](auto const& a, auto const& b) {
-            return a.frame < b.frame;
-        });
-        for (auto const& event : committed)
-            output.inputs.emplace_back(event.frame, event.button, event.player2, event.down);
-    }
-
-    if (!solved)
-        co_return std::vector<uint8_t>{};
+    for (auto const& event : solvedPath)
+        output.inputs.emplace_back(event.frame, event.button, event.player2, event.down);
     co_return output.exportData().unwrapOr({});
 }
