@@ -10,6 +10,7 @@
 #include <limits>
 #include <memory>
 #include <random>
+#include <string_view>
 #include <unordered_set>
 
 using namespace geode::prelude;
@@ -71,62 +72,114 @@ void setRuntimeSeed(PlayLayer* layer, uint32_t seed) {
     GameToolbox::fast_srand(seed);
 }
 
+uint64_t levelChecksum(GJGameLevel* level) {
+    auto data = ZipUtils::decompressString(level->m_levelString, true, 0);
+    uint64_t hash = 1469598103934665603ull;
+    for (unsigned char byte : data) {
+        hash ^= byte;
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
 } // namespace
 
-VerificationResult verifyInGame(GJGameLevel* level, std::vector<uint8_t> const& macro) {
+RuntimeVerificationTask verifyInGameCooperative(
+    GJGameLevel* level,
+    std::vector<uint8_t> macro,
+    std::atomic_bool& stop
+) {
     VerificationResult result;
     if (!level) {
         result.error = "missing level";
-        return result;
+        co_return result;
     }
     if (macro.empty()) {
         result.error = "pathfinder returned an empty replay";
-        return result;
+        co_return result;
     }
 
     auto imported = PathfinderReplay::importData(macro);
     if (imported.isErr()) {
         result.error = "could not decode generated replay";
-        return result;
+        co_return result;
     }
 
     auto replay = imported.unwrap();
+    constexpr std::string_view checksumPrefix = "level-checksum:";
+    if (!replay.description.starts_with(checksumPrefix)) {
+        result.error = "replay is missing the level checksum";
+        co_return result;
+    }
+    uint64_t expectedChecksum = 0;
+    try {
+        expectedChecksum = std::stoull(
+            replay.description.substr(checksumPrefix.size()), nullptr, 16);
+    } catch (...) {
+        result.error = "replay has an invalid level checksum";
+        co_return result;
+    }
+    if (expectedChecksum != levelChecksum(level)) {
+        result.error = "level changed after the path was searched";
+        co_return result;
+    }
+    if (!std::isfinite(replay.framerate) || replay.framerate < 30. ||
+        replay.framerate > 1000.) {
+        result.error = "replay has an unsupported framerate";
+        co_return result;
+    }
     auto inputs = replay.inputs;
     const auto runtimeSeed = static_cast<uint32_t>(replay.seed);
     std::stable_sort(inputs.begin(), inputs.end(), [](auto const& lhs, auto const& rhs) {
-        return lhs.frame < rhs.frame;
+        if (lhs.frame != rhs.frame) return lhs.frame < rhs.frame;
+        if (lhs.player2 != rhs.player2) return lhs.player2 < rhs.player2;
+        if (lhs.button != rhs.button) return lhs.button < rhs.button;
+        return lhs.down < rhs.down; // release before press on the same frame
     });
-    pathfinder::ClickRateLimiter clickLimiter;
+    pathfinder::ClickRateLimiter clickLimiter(
+        static_cast<uint64_t>(std::llround(replay.framerate)));
     for (auto const& input : inputs) {
         if (input.down && input.button == 1 &&
             !clickLimiter.accept(input.frame, input.player2)) {
             result.frame = static_cast<int>(input.frame);
             result.player2 = input.player2;
             result.error = "replay exceeds the 70 CPS cap";
-            return result;
+            co_return result;
         }
     }
     std::deque<gdr::Input<"">> pending(inputs.begin(), inputs.end());
 
     // PlayLayer::create constructs the exact runtime object collection. Its
     // normal update runs spawn/move/toggle triggers and all 2.2 collision code.
+    auto previousLayer = PlayLayer::get();
+    CC_SAFE_RETAIN(previousLayer);
     auto playLayer = PlayLayer::create(level, false, false);
     if (!playLayer) {
+        CC_SAFE_RELEASE(previousLayer);
         result.error = "Geometry Dash could not create a verification PlayLayer";
-        return result;
+        co_return result;
     }
     playLayer->retain();
+    struct VerificationLayerLifetime {
+        PlayLayer* layer;
+        PlayLayer* previous;
+        ~VerificationLayerLifetime() {
+            layer->release();
+            GameManager::sharedState()->m_playLayer = previous;
+            CC_SAFE_RELEASE(previous);
+        }
+    } layerLifetime {playLayer, previousLayer};
     playLayer->setVisible(false);
     setRuntimeSeed(playLayer, runtimeSeed);
     playLayer->resetLevel();
 
     CaptureGuard capture;
-    constexpr float step = 1.f / 240.f;
-    // A malformed level must not freeze the UI forever. 20 minutes is above
-    // the editor's practical level duration while still providing a hard stop.
-    constexpr int maxFrames = 20 * 60 * 240;
+    const float step = 1.f / static_cast<float>(replay.framerate);
+    // A malformed level must not run forever. Twenty minutes is above the
+    // editor's practical duration while still providing a hard stop.
+    const int maxFrames = static_cast<int>(20 * 60 * replay.framerate);
 
-    for (int frame = 1; frame <= maxFrames; ++frame) {
+    for (int frame = 1; frame <= maxFrames && !stop; ++frame) {
         result.frame = frame;
         while (!pending.empty() && pending.front().frame <= frame) {
             auto const input = pending.front();
@@ -156,7 +209,18 @@ VerificationResult verifyInGame(GJGameLevel* level, std::vector<uint8_t> const& 
             mixPlayer(playLayer->m_player2);
         mix(playLayer->m_isDualMode);
         mix(playLayer->m_randomSeed);
+        mix(playLayer->m_spawnTuples.size());
+        mix(playLayer->m_sequenceTriggers.size());
+        mix(playLayer->m_collectedItems ? playLayer->m_collectedItems->count() : 0);
+        mix(playLayer->m_objectsToMove ? playLayer->m_objectsToMove->count() : 0);
+        mix(playLayer->m_spawnChannelRelated0.size());
+        mix(playLayer->m_spawnChannelRelated1.size());
+        mix(playLayer->m_movedCount);
+        mix(playLayer->m_areaMovedCount);
+        result.frameHashes.push_back(result.traceHash);
 
+        if (frame % 60 == 0)
+            co_yield true;
         if (s_collision.died)
             break;
         if (playLayer->m_hasCompletedLevel) {
@@ -177,28 +241,44 @@ VerificationResult verifyInGame(GJGameLevel* level, std::vector<uint8_t> const& 
     result.playerY = s_collision.playerPosition.y;
     result.playerYVelocity = s_collision.playerYVelocity;
     if (!result.completed && !result.died && result.error.empty())
-        result.error = "verification timed out before level completion";
+        result.error = stop ? "verification cancelled" :
+            "verification timed out before level completion";
 
-    playLayer->release();
-    return result;
+    co_return result;
+}
+
+VerificationResult verifyInGame(GJGameLevel* level, std::vector<uint8_t> const& macro) {
+    std::atomic_bool stop = false;
+    auto task = verifyInGameCooperative(level, macro, stop);
+    while (!task.resume()) {}
+    return task.takeResult();
 }
 
 RuntimeSearchTask pathfindInGame(
     GJGameLevel* level,
     std::atomic_bool& stop,
-    std::function<void(double)> progress
+    std::function<void(SearchProgress const&)> progress
 ) {
     if (!level)
         co_return std::vector<uint8_t>{};
 
+    auto previousLayer = PlayLayer::get();
+    CC_SAFE_RETAIN(previousLayer);
     auto playLayer = PlayLayer::create(level, false, false);
-    if (!playLayer)
+    if (!playLayer) {
+        CC_SAFE_RELEASE(previousLayer);
         co_return std::vector<uint8_t>{};
+    }
     playLayer->retain();
     struct LayerLifetime {
         PlayLayer* layer;
-        ~LayerLifetime() { layer->release(); }
-    } layerLifetime {playLayer};
+        PlayLayer* previous;
+        ~LayerLifetime() {
+            layer->release();
+            GameManager::sharedState()->m_playLayer = previous;
+            CC_SAFE_RELEASE(previous);
+        }
+    } layerLifetime {playLayer, previousLayer};
     playLayer->setVisible(false);
 
     const auto configuredSeed = Mod::get()->getSettingValue<int64_t>("search-seed");
@@ -230,14 +310,19 @@ RuntimeSearchTask pathfindInGame(
         bool right = false;
     };
     using CheckpointPtr = std::shared_ptr<CheckpointObject>;
+    struct PathLink {
+        std::shared_ptr<PathLink const> parent;
+        std::vector<Event> events;
+    };
     struct Node {
         CheckpointPtr checkpoint;
         uint32_t frame = 0;
         Buttons p1;
         Buttons p2;
-        std::vector<Event> path;
+        std::shared_ptr<PathLink const> path;
         float score = 0;
         uint64_t stateHash = 0;
+        uint64_t diversityHash = 0;
     };
 
     auto captureCheckpoint = [&]() -> CheckpointPtr {
@@ -286,6 +371,14 @@ RuntimeSearchTask pathfindInGame(
         mix(playLayer->m_currentStep);
         mix(playLayer->m_commandIndex);
         mix(playLayer->m_randomSeed);
+        mix(playLayer->m_spawnTuples.size());
+        mix(playLayer->m_sequenceTriggers.size());
+        mix(playLayer->m_collectedItems ? playLayer->m_collectedItems->count() : 0);
+        mix(playLayer->m_objectsToMove ? playLayer->m_objectsToMove->count() : 0);
+        mix(playLayer->m_spawnChannelRelated0.size());
+        mix(playLayer->m_spawnChannelRelated1.size());
+        mix(playLayer->m_movedCount);
+        mix(playLayer->m_areaMovedCount);
         for (auto* object : playLayer->m_activeObjects) {
             if (!object) continue;
             mix(static_cast<uint32_t>(object->m_uniqueID));
@@ -297,10 +390,34 @@ RuntimeSearchTask pathfindInGame(
         return hash;
     };
 
+    auto diversityHash = [&] {
+        uint64_t hash = 1469598103934665603ull;
+        auto mix = [&](int64_t value) {
+            hash ^= static_cast<uint64_t>(value);
+            hash *= 1099511628211ull;
+        };
+        auto player = [&](PlayerObject* value) {
+            mix(static_cast<int64_t>(std::floor(value->getPositionX() / 30.f)));
+            mix(static_cast<int64_t>(std::floor(value->getPositionY() / 30.f)));
+            mix(static_cast<int64_t>(std::floor(value->m_yVelocity / 100.)));
+            mix(value->m_isShip | (value->m_isBall << 1) |
+                (value->m_isBird << 2) | (value->m_isDart << 3) |
+                (value->m_isRobot << 4) | (value->m_isSpider << 5) |
+                (value->m_isSwing << 6) | (value->m_isUpsideDown << 7));
+        };
+        player(playLayer->m_player1);
+        if (playLayer->m_isDualMode) player(playLayer->m_player2);
+        mix(playLayer->m_currentChannel);
+        return hash;
+    };
+
     std::mt19937 rng(runtimeSeed ^ 0x9e3779b9u);
     std::uniform_real_distribution<double> chance(0., 1.);
-    std::vector<Node> frontier {{captureCheckpoint(), 0, {}, {}, {}, 0, 0}};
+    auto rootCheckpoint = captureCheckpoint();
+    std::vector<Node> frontier {{rootCheckpoint, 0, {}, {}, {}, 0, 0, 0}};
     std::vector<Event> solvedPath;
+    int restart = 0;
+    constexpr int maxRestarts = 3;
 
     for (int generation = 0;
          generation < maxGenerations && !stop && solvedPath.empty();
@@ -356,6 +473,7 @@ RuntimeSearchTask pathfindInGame(
                 auto jumpDecision = [&](uint32_t frame, bool player2, bool selected,
                                         PlayerObject* player, Buttons& buttons,
                                         uint32_t& releaseFrame) {
+                    if (player2 && !playLayer->m_isDualMode) return;
                     const bool action = player->m_isSpider || player->m_isSwing;
                     const bool harmless = player->m_isRobot || player->m_isBall ||
                         (!player->m_isShip && !player->m_isBird && !player->m_isDart &&
@@ -372,7 +490,8 @@ RuntimeSearchTask pathfindInGame(
                 auto directionDecision = [&](uint32_t frame, bool player2,
                                              int8_t direction, PlayerObject* player,
                                              Buttons& buttons) {
-                    if (!player->m_isPlatformer || direction < 0) return;
+                    if ((player2 && !playLayer->m_isDualMode) ||
+                        !player->m_isPlatformer || direction < 0) return;
                     send(frame, 2, player2, direction == 1, buttons.left);
                     send(frame, 3, player2, direction == 2, buttons.right);
                 };
@@ -408,8 +527,15 @@ RuntimeSearchTask pathfindInGame(
                 }
 
                 if (completed) {
-                    solvedPath = base.path;
-                    solvedPath.insert(solvedPath.end(), events.begin(), events.end());
+                    auto leaf = std::make_shared<PathLink const>(PathLink {
+                        base.path, std::move(events)
+                    });
+                    std::vector<std::shared_ptr<PathLink const>> links;
+                    for (auto link = leaf; link; link = link->parent)
+                        links.push_back(link);
+                    for (auto it = links.rbegin(); it != links.rend(); ++it)
+                        solvedPath.insert(solvedPath.end(),
+                            (*it)->events.begin(), (*it)->events.end());
                 } else if (!s_collision.died) {
                     const auto hash = runtimeStateHash();
                     if (seenStates.insert(hash).second) {
@@ -418,11 +544,23 @@ RuntimeSearchTask pathfindInGame(
                         candidate.frame = base.frame + horizon;
                         candidate.p1 = p1;
                         candidate.p2 = p2;
-                        candidate.path = base.path;
-                        candidate.path.insert(candidate.path.end(), events.begin(), events.end());
-                        candidate.score = playLayer->getCurrentPercent() * 1000.f +
-                            static_cast<float>(candidate.frame) * .001f;
+                        candidate.path = std::make_shared<PathLink const>(PathLink {
+                            base.path, std::move(events)
+                        });
+                        const auto end = playLayer->getEndPosition();
+                        const auto p1pos = playLayer->m_player1->getPosition();
+                        const float endDistance = std::hypot(
+                            p1pos.x - end.x, p1pos.y - end.y);
+                        float velocityPenalty = static_cast<float>(
+                            std::abs(playLayer->m_player1->m_yVelocity) * .01);
+                        if (playLayer->m_isDualMode)
+                            velocityPenalty += static_cast<float>(
+                                std::abs(playLayer->m_player2->m_yVelocity) * .01);
+                        candidate.score = playLayer->getCurrentPercent() * 1000.f -
+                            endDistance * .001f - velocityPenalty -
+                            static_cast<float>(candidate.path->events.size()) * .1f;
                         candidate.stateHash = hash;
+                        candidate.diversityHash = diversityHash();
                         candidates.push_back(std::move(candidate));
                     }
                 } else {
@@ -437,33 +575,97 @@ RuntimeSearchTask pathfindInGame(
 
         if (!solvedPath.empty() || stop) break;
         if (candidates.empty()) {
-            horizon = std::max(minHorizon, horizon / 2);
+            if (horizon == minHorizon && restart < maxRestarts) {
+                ++restart;
+                rng.seed((runtimeSeed ^ 0x9e3779b9u) +
+                    static_cast<uint32_t>(restart) * 0x85ebca6bu);
+                frontier = {{rootCheckpoint, 0, {}, {}, {}, 0, 0, 0}};
+                horizon = 120;
+                log::info("Pathfinder deterministic restart {}/{} (seed {})",
+                    restart, maxRestarts, runtimeSeed);
+            } else {
+                horizon = std::max(minHorizon, horizon / 2);
+            }
             continue;
         }
 
         std::sort(candidates.begin(), candidates.end(), [](Node const& a, Node const& b) {
             return a.score > b.score;
         });
-        if (candidates.size() > beamWidth)
-            candidates.resize(beamWidth);
-        frontier = std::move(candidates);
+        std::unordered_set<uint64_t> diversityBuckets;
+        std::vector<Node> diverse;
+        diverse.reserve(beamWidth);
+        for (auto& candidate : candidates) {
+            if (diversityBuckets.insert(candidate.diversityHash).second) {
+                diverse.push_back(std::move(candidate));
+                if (diverse.size() == beamWidth) break;
+            }
+        }
+        // If clustering was too aggressive, fill remaining slots by score.
+        for (auto& candidate : candidates) {
+            if (diverse.size() == beamWidth) break;
+            if (candidate.checkpoint)
+                diverse.push_back(std::move(candidate));
+        }
+        frontier = std::move(diverse);
 
         if (deadBranches * 2 > attemptedBranches)
             horizon = std::max(minHorizon, horizon / 2);
         else
             horizon = std::min(maxHorizon, horizon + 30);
-        if (progress && !frontier.empty())
-            progress(std::clamp<double>(frontier.front().score / 1000., 0., 100.));
+        if (progress && !frontier.empty()) {
+            Buttons statusP1;
+            Buttons statusP2;
+            restore(frontier.front(), statusP1, statusP2);
+            auto modeName = [](PlayerObject* player) -> std::string {
+                if (player->m_isSpider) return "Spider";
+                if (player->m_isSwing) return "Swing";
+                if (player->m_isRobot) return "Robot";
+                if (player->m_isDart) return "Wave";
+                if (player->m_isBird) return "UFO";
+                if (player->m_isBall) return "Ball";
+                if (player->m_isShip) return "Ship";
+                return "Cube";
+            };
+            SearchProgress status;
+            status.percent = std::clamp<double>(
+                playLayer->getCurrentPercent(), 0., 100.);
+            status.generation = generation + 1;
+            status.restart = restart;
+            status.horizon = horizon;
+            status.beamSize = frontier.size();
+            status.player1Mode = modeName(playLayer->m_player1);
+            status.player2Mode = playLayer->m_isDualMode
+                ? modeName(playLayer->m_player2) : "-";
+            progress(status);
+        }
     }
 
     if (solvedPath.empty())
         co_return std::vector<uint8_t>{};
     std::stable_sort(solvedPath.begin(), solvedPath.end(), [](auto const& a, auto const& b) {
-        return a.frame < b.frame;
+        if (a.frame != b.frame) return a.frame < b.frame;
+        if (a.player2 != b.player2) return a.player2 < b.player2;
+        if (a.button != b.button) return a.button < b.button;
+        return a.down < b.down;
     });
+    // Remove state-neutral records while preserving release-before-press pulse
+    // ordering. Runtime verification still gates the minimized replay.
+    bool buttonState[2][4] {};
+    std::vector<Event> minimized;
+    minimized.reserve(solvedPath.size());
+    for (auto const& event : solvedPath) {
+        auto& state = buttonState[event.player2 ? 1 : 0][event.button];
+        if (state == event.down) continue;
+        state = event.down;
+        minimized.push_back(event);
+    }
+
     PathfinderReplay output;
     output.seed = static_cast<int>(runtimeSeed);
-    for (auto const& event : solvedPath)
+    output.framerate = 240.;
+    output.description = fmt::format("level-checksum:{:016x}", levelChecksum(level));
+    for (auto const& event : minimized)
         output.inputs.emplace_back(event.frame, event.button, event.player2, event.down);
     co_return output.exportData().unwrapOr({});
 }

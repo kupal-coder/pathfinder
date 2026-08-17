@@ -26,6 +26,10 @@ REQUIRED = {
     "cps-70-cube.lvl",
     "cps-70-spider.lvl",
     "cps-70-swing.lvl",
+    "cps-transition-cube-spider.lvl",
+    "cps-transition-robot-swing.lvl",
+    "cps-transition-spider-ball.lvl",
+    "cps-transition-dual-split.lvl",
 }
 
 

@@ -9,7 +9,7 @@
 	"geode": "5.3.0",
 	"name": "Pathfinder",
 	"developer": "camila314",
-	"version": "v1.0.0-beta.250",
+	"version": "v1.0.0-beta.251",
 	"settings": {
 		"search-seed": {
 			"name": "Deterministic Search Seed",
@@ -18,6 +18,20 @@
 			"default": 0,
 			"min": 0,
 			"max": 2147483647
+		},
+		"test-timeout": {
+			"name": "Acceptance Test Timeout",
+			"description": "Maximum seconds spent on one fixture before continuing to the next.",
+			"type": "int",
+			"default": 120,
+			"min": 10,
+			"max": 3600
+		},
+		"acceptance-filter": {
+			"name": "Acceptance Test Filter",
+			"description": "Only run fixture names containing this text. Leave empty to run all.",
+			"type": "string",
+			"default": ""
 		}
 	},
 	"dependencies": {

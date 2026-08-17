@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <coroutine>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <functional>
@@ -26,6 +27,7 @@ struct VerificationResult {
     float playerY = 0;
     double playerYVelocity = 0;
     uint64_t traceHash = 1469598103934665603ull;
+    std::vector<uint64_t> frameHashes;
     std::string error;
 };
 
@@ -34,36 +36,37 @@ struct VerificationResult {
 // graph, movement and collision callbacks rather than gd-sim.
 VerificationResult verifyInGame(GJGameLevel* level, std::vector<uint8_t> const& macro);
 
-class RuntimeSearchTask {
+template <class T>
+class CooperativeTask {
 public:
     struct promise_type {
-        std::vector<uint8_t> result;
+        T result {};
         std::exception_ptr exception;
 
-        RuntimeSearchTask get_return_object() {
-            return RuntimeSearchTask(
+        CooperativeTask get_return_object() {
+            return CooperativeTask(
                 std::coroutine_handle<promise_type>::from_promise(*this)
             );
         }
         std::suspend_always initial_suspend() noexcept { return {}; }
         std::suspend_always final_suspend() noexcept { return {}; }
         std::suspend_always yield_value(bool) noexcept { return {}; }
-        void return_value(std::vector<uint8_t> value) { result = std::move(value); }
+        void return_value(T value) { result = std::move(value); }
         void unhandled_exception() { exception = std::current_exception(); }
     };
 
-    RuntimeSearchTask(RuntimeSearchTask const&) = delete;
-    RuntimeSearchTask& operator=(RuntimeSearchTask const&) = delete;
-    RuntimeSearchTask(RuntimeSearchTask&& other) noexcept
+    CooperativeTask(CooperativeTask const&) = delete;
+    CooperativeTask& operator=(CooperativeTask const&) = delete;
+    CooperativeTask(CooperativeTask&& other) noexcept
       : m_handle(std::exchange(other.m_handle, {})) {}
-    RuntimeSearchTask& operator=(RuntimeSearchTask&& other) noexcept {
+    CooperativeTask& operator=(CooperativeTask&& other) noexcept {
         if (this != &other) {
             if (m_handle) m_handle.destroy();
             m_handle = std::exchange(other.m_handle, {});
         }
         return *this;
     }
-    ~RuntimeSearchTask() { if (m_handle) m_handle.destroy(); }
+    ~CooperativeTask() { if (m_handle) m_handle.destroy(); }
 
     bool resume() {
         if (m_handle && !m_handle.done()) m_handle.resume();
@@ -71,14 +74,33 @@ public:
             std::rethrow_exception(m_handle.promise().exception);
         return !m_handle || m_handle.done();
     }
-    std::vector<uint8_t> takeResult() {
-        return m_handle ? std::move(m_handle.promise().result) : std::vector<uint8_t>{};
+    T takeResult() {
+        return m_handle ? std::move(m_handle.promise().result) : T{};
     }
 
 private:
-    explicit RuntimeSearchTask(std::coroutine_handle<promise_type> handle)
+    explicit CooperativeTask(std::coroutine_handle<promise_type> handle)
       : m_handle(handle) {}
     std::coroutine_handle<promise_type> m_handle;
+};
+
+using RuntimeSearchTask = CooperativeTask<std::vector<uint8_t>>;
+using RuntimeVerificationTask = CooperativeTask<VerificationResult>;
+
+RuntimeVerificationTask verifyInGameCooperative(
+    GJGameLevel* level,
+    std::vector<uint8_t> macro,
+    std::atomic_bool& stop
+);
+
+struct SearchProgress {
+    double percent = 0;
+    int generation = 0;
+    int restart = 0;
+    uint32_t horizon = 0;
+    size_t beamSize = 0;
+    std::string player1Mode;
+    std::string player2Mode;
 };
 
 // Searches by advancing and checkpointing a real PlayLayer. The coroutine
@@ -86,5 +108,5 @@ private:
 RuntimeSearchTask pathfindInGame(
     GJGameLevel* level,
     std::atomic_bool& stop,
-    std::function<void(double)> progress
+    std::function<void(SearchProgress const&)> progress
 );

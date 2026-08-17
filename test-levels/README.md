@@ -2,9 +2,10 @@
 
 These files are raw, uncompressed Geometry Dash level strings. They are bundled
 with the mod and can be run from the **Tests** button beside Pathfinder in the
-editor. The runner searches every fixture, performs two fresh runtime replays,
-and writes `acceptance-report.txt` in the mod save directory. A task passes only
-if both replays complete without safe mode and produce identical trace hashes.
+editor. The runner supports name filtering and per-test timeouts, performs two
+fresh cooperative runtime replays, and writes text plus JSON reports in the mod
+save directory. Failures also create local diagnostic bundles. A task passes
+only if both replays complete without safe mode and produce identical traces.
 
 ## `object-*.lvl` (Task 1)
 
