@@ -33,4 +33,20 @@ int main() {
     assert(harmlessHoldSpam(ActionMode::Robot));
     assert(!harmlessHoldSpam(ActionMode::Spider));
     assert(!harmlessHoldSpam(ActionMode::Swing));
+
+    ClickRateLimiter limiter;
+    for (uint64_t frame = 1; frame <= 70; ++frame) {
+        assert(limiter.accept(frame, false));
+        assert(limiter.accept(frame, true)); // P2 has an independent cap.
+    }
+    assert(!limiter.accept(71, false));
+    assert(!limiter.accept(71, true));
+
+    // At exactly one 240 Hz window later the oldest press expires.
+    assert(limiter.accept(241, false));
+    assert(limiter.accept(241, true));
+
+    ClickRateLimiter generatedLimiter;
+    for (auto frame : fixedTickFrames(1, 2400, 1. / 240.))
+        assert(generatedLimiter.accept(frame, false));
 }

@@ -5,6 +5,7 @@
 #include <Geode/modify/PlayLayer.hpp>
 #include <gdr/gdr.hpp>
 #include <algorithm>
+#include <bit>
 #include <deque>
 #include <limits>
 #include <random>
@@ -23,6 +24,12 @@ struct CollisionCapture {
     bool died = false;
     int objectID = 0;
     CCPoint position = CCPointZero;
+    float rotation = 0;
+    float scaleX = 1;
+    float scaleY = 1;
+    bool player2 = false;
+    CCPoint playerPosition = CCPointZero;
+    double playerYVelocity = 0;
 };
 
 CollisionCapture s_collision;
@@ -31,9 +38,17 @@ class $modify(PathfinderCollisionCapture, PlayLayer) {
     void destroyPlayer(PlayerObject* player, GameObject* object) {
         if (s_collision.active) {
             s_collision.died = true;
+            if (player) {
+                s_collision.player2 = player->isPlayer2();
+                s_collision.playerPosition = player->getPosition();
+                s_collision.playerYVelocity = player->m_yVelocity;
+            }
             if (object) {
                 s_collision.objectID = object->m_objectID;
                 s_collision.position = object->getPosition();
+                s_collision.rotation = object->getRotation();
+                s_collision.scaleX = object->getScaleX();
+                s_collision.scaleY = object->getScaleY();
             }
         }
         PlayLayer::destroyPlayer(player, object);
@@ -47,6 +62,12 @@ struct CaptureGuard {
     }
     ~CaptureGuard() { s_collision.active = false; }
 };
+
+void setRuntimeSeed(PlayLayer* layer, uint32_t seed) {
+    layer->m_randomSeed = seed;
+    layer->m_replayRandSeed = seed;
+    GameToolbox::fast_srand(seed);
+}
 
 } // namespace
 
@@ -67,10 +88,22 @@ VerificationResult verifyInGame(GJGameLevel* level, std::vector<uint8_t> const& 
         return result;
     }
 
-    auto inputs = imported.unwrap().inputs;
+    auto replay = imported.unwrap();
+    auto inputs = replay.inputs;
+    const auto runtimeSeed = static_cast<uint32_t>(replay.seed);
     std::stable_sort(inputs.begin(), inputs.end(), [](auto const& lhs, auto const& rhs) {
         return lhs.frame < rhs.frame;
     });
+    pathfinder::ClickRateLimiter clickLimiter;
+    for (auto const& input : inputs) {
+        if (input.down && input.button == 1 &&
+            !clickLimiter.accept(input.frame, input.player2)) {
+            result.frame = static_cast<int>(input.frame);
+            result.player2 = input.player2;
+            result.error = "replay exceeds the 70 CPS cap";
+            return result;
+        }
+    }
     std::deque<gdr::Input<"">> pending(inputs.begin(), inputs.end());
 
     // PlayLayer::create constructs the exact runtime object collection. Its
@@ -82,6 +115,7 @@ VerificationResult verifyInGame(GJGameLevel* level, std::vector<uint8_t> const& 
     }
     playLayer->retain();
     playLayer->setVisible(false);
+    setRuntimeSeed(playLayer, runtimeSeed);
     playLayer->resetLevel();
 
     CaptureGuard capture;
@@ -100,6 +134,27 @@ VerificationResult verifyInGame(GJGameLevel* level, std::vector<uint8_t> const& 
 
         // This is deliberately the game's update, not a parallel physics step.
         playLayer->update(step);
+
+        auto mix = [&](uint64_t value) {
+            result.traceHash ^= value;
+            result.traceHash *= 1099511628211ull;
+        };
+        auto mixPlayer = [&](PlayerObject* player) {
+            mix(std::bit_cast<uint32_t>(player->getPositionX()));
+            mix(std::bit_cast<uint32_t>(player->getPositionY()));
+            mix(std::bit_cast<uint64_t>(player->m_yVelocity));
+            uint64_t flags = player->m_isShip | (player->m_isBall << 1) |
+                (player->m_isBird << 2) | (player->m_isDart << 3) |
+                (player->m_isRobot << 4) | (player->m_isSpider << 5) |
+                (player->m_isSwing << 6) | (player->m_isUpsideDown << 7);
+            mix(flags);
+        };
+        mixPlayer(playLayer->m_player1);
+        if (playLayer->m_isDualMode)
+            mixPlayer(playLayer->m_player2);
+        mix(playLayer->m_isDualMode);
+        mix(playLayer->m_randomSeed);
+
         if (s_collision.died)
             break;
         if (playLayer->m_hasCompletedLevel) {
@@ -112,6 +167,13 @@ VerificationResult verifyInGame(GJGameLevel* level, std::vector<uint8_t> const& 
     result.objectID = s_collision.objectID;
     result.objectX = s_collision.position.x;
     result.objectY = s_collision.position.y;
+    result.objectRotation = s_collision.rotation;
+    result.objectScaleX = s_collision.scaleX;
+    result.objectScaleY = s_collision.scaleY;
+    result.player2 = s_collision.player2;
+    result.playerX = s_collision.playerPosition.x;
+    result.playerY = s_collision.playerPosition.y;
+    result.playerYVelocity = s_collision.playerYVelocity;
     if (!result.completed && !result.died && result.error.empty())
         result.error = "verification timed out before level completion";
 
@@ -132,6 +194,12 @@ std::vector<uint8_t> pathfindInGame(
         return {};
     playLayer->retain();
     playLayer->setVisible(false);
+    const auto configuredSeed = Mod::get()->getSettingValue<int64_t>("search-seed");
+    const uint32_t runtimeSeed = configuredSeed == 0
+        ? (std::random_device{}() & 0x7fffffffu)
+        : static_cast<uint32_t>(configuredSeed);
+    log::info("Pathfinder runtime seed: {}", runtimeSeed);
+    setRuntimeSeed(playLayer, runtimeSeed);
     playLayer->resetLevel();
 
     CaptureGuard capture;
@@ -166,6 +234,11 @@ std::vector<uint8_t> pathfindInGame(
         auto checkpoint = playLayer->createCheckpoint();
         checkpoint->retain();
         history.push_back({checkpoint, frame, p1Down, p2Down, committed.size()});
+        constexpr size_t maxRetainedCheckpoints = 256;
+        if (history.size() > maxRetainedCheckpoints) {
+            history.front().checkpoint->release();
+            history.erase(history.begin());
+        }
     };
     savePoint(0, false, false);
 
@@ -186,7 +259,7 @@ std::vector<uint8_t> pathfindInGame(
         s_collision.position = CCPointZero;
     };
 
-    std::mt19937 rng(std::random_device{}());
+    std::mt19937 rng(runtimeSeed ^ 0x9e3779b9u);
     std::uniform_real_distribution<double> chance(0., 1.);
     bool solved = false;
 
@@ -199,75 +272,85 @@ std::vector<uint8_t> pathfindInGame(
 
         for (int trialIndex = 0; trialIndex < trialsPerChunk && !stop; ++trialIndex) {
             Trial trial;
-
-            auto planPlayer = [&](bool player2, bool baseDown, PlayerCheckpoint* state) {
-                if (!state)
-                    return;
-                const bool actionMode = state->m_isSpider || state->m_isSwing;
-                const bool harmlessSpam = state->m_isRobot || state->m_isBall ||
-                    (!state->m_isShip && !state->m_isBird && !state->m_isDart &&
-                     !state->m_isSpider && !state->m_isSwing);
-
-                // Spider and swing presses are discrete actions. Represent each
-                // selected click as a pulse, and never use the constant-spam
-                // trial for these modes. Releases do not consume a click slot.
-                if (actionMode) {
-                    if (baseDown)
-                        trial.events.push_back({base.frame + 1, player2, false});
-                    if (trialIndex == 0)
-                        return;
-                    for (auto frame : ticks) {
-                        if (chance(rng) < .10) {
-                            trial.events.push_back({frame, player2, true});
-                            if (frame + 1 <= base.frame + horizon)
-                                trial.events.push_back({frame + 1, player2, false});
-                        }
-                    }
-                    return;
-                }
-
-                // Cube, ball and robot can safely test a true 70 CPS pulse
-                // candidate. Ship/UFO/wave need holds, so they only get sparse
-                // state transitions on the same fixed 70 Hz decision clock.
-                if (trialIndex == 1 && harmlessSpam) {
-                    if (baseDown)
-                        trial.events.push_back({base.frame + 1, player2, false});
-                    for (auto frame : ticks) {
-                        trial.events.push_back({frame, player2, true});
-                        if (frame + 1 <= base.frame + horizon)
-                            trial.events.push_back({frame + 1, player2, false});
-                    }
-                    return;
-                }
-
-                bool plannedDown = baseDown;
-                if (trialIndex != 0) {
-                    for (auto frame : ticks) {
-                        if (chance(rng) < .10) {
-                            plannedDown = !plannedDown;
-                            trial.events.push_back({frame, player2, plannedDown});
-                        }
-                    }
-                }
+            struct Decision {
+                uint32_t frame;
+                bool p1;
+                bool p2;
             };
-
-            planPlayer(false, base.p1Down, base.checkpoint->m_player1Checkpoint);
-            planPlayer(true, base.p2Down, base.checkpoint->m_player2Checkpoint);
-            std::stable_sort(trial.events.begin(), trial.events.end(), [](auto const& a, auto const& b) {
-                return a.frame < b.frame;
-            });
+            std::vector<Decision> decisions;
+            decisions.reserve(ticks.size());
+            for (auto frame : ticks) {
+                decisions.push_back({
+                    frame,
+                    trialIndex != 0 && chance(rng) < .10,
+                    trialIndex != 0 && chance(rng) < .10
+                });
+            }
 
             bool liveP1 = false;
             bool liveP2 = false;
             restore(base, liveP1, liveP2);
-            size_t eventIndex = 0;
+            size_t decisionIndex = 0;
+            uint32_t releaseP1 = 0;
+            uint32_t releaseP2 = 0;
+
+            auto send = [&](uint32_t frame, bool player2, bool down, bool& live) {
+                if (live == down)
+                    return;
+                playLayer->handleButton(down, 1, player2);
+                live = down;
+                trial.events.push_back({frame, player2, down});
+            };
+
+            auto applyDecision = [&](
+                uint32_t frame,
+                bool player2,
+                bool selected,
+                PlayerObject* player,
+                bool& live,
+                uint32_t& releaseFrame
+            ) {
+                const bool actionMode = player->m_isSpider || player->m_isSwing;
+                const bool harmlessSpam = player->m_isRobot || player->m_isBall ||
+                    (!player->m_isShip && !player->m_isBird && !player->m_isDart &&
+                     !player->m_isSpider && !player->m_isSwing);
+
+                // The dense candidate exists only in harmless modes. Spider
+                // and swing continue using random selected actions, even when
+                // this is trial one, because every press changes their state.
+                const bool pulse = actionMode ? selected
+                    : (trialIndex == 1 && harmlessSpam);
+                if (pulse) {
+                    // A pulse is one press on a 70 Hz boundary followed by a
+                    // release on the next physics frame. If a portal changed
+                    // mode while held, normalize the old hold first.
+                    send(frame, player2, false, live);
+                    send(frame, player2, true, live);
+                    releaseFrame = frame + 1;
+                } else if (selected) {
+                    // Ship/UFO/wave and ordinary non-spam candidates need real
+                    // holds, so decisions toggle rather than pulse.
+                    send(frame, player2, !live, live);
+                }
+            };
+
             for (uint32_t offset = 1; offset <= horizon; ++offset) {
                 const uint32_t frame = base.frame + offset;
-                while (eventIndex < trial.events.size() && trial.events[eventIndex].frame == frame) {
-                    auto const event = trial.events[eventIndex++];
-                    playLayer->handleButton(event.down, 1, event.player2);
-                    (event.player2 ? liveP2 : liveP1) = event.down;
+                if (releaseP1 == frame) {
+                    send(frame, false, false, liveP1);
+                    releaseP1 = 0;
                 }
+                if (releaseP2 == frame) {
+                    send(frame, true, false, liveP2);
+                    releaseP2 = 0;
+                }
+
+                if (decisionIndex < decisions.size() && decisions[decisionIndex].frame == frame) {
+                    auto const decision = decisions[decisionIndex++];
+                    applyDecision(frame, false, decision.p1, playLayer->m_player1, liveP1, releaseP1);
+                    applyDecision(frame, true, decision.p2, playLayer->m_player2, liveP2, releaseP2);
+                }
+
                 playLayer->update(physicsStep);
                 trial.survived = offset;
                 if (playLayer->m_hasCompletedLevel) {
@@ -337,6 +420,7 @@ std::vector<uint8_t> pathfindInGame(
     }
 
     PathfinderReplay output;
+    output.seed = static_cast<int>(runtimeSeed);
     if (solved) {
         std::stable_sort(committed.begin(), committed.end(), [](auto const& a, auto const& b) {
             return a.frame < b.frame;

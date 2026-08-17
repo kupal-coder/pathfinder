@@ -1,7 +1,9 @@
 #pragma once
 
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <deque>
 #include <vector>
 
 namespace pathfinder {
@@ -53,6 +55,28 @@ constexpr bool harmlessHoldSpam(ActionMode mode) {
     return mode == ActionMode::Cube || mode == ActionMode::Ball ||
            mode == ActionMode::Robot;
 }
+
+class ClickRateLimiter {
+    std::array<std::deque<uint64_t>, 2> m_presses;
+    uint64_t m_windowFrames;
+    size_t m_limit;
+
+public:
+    explicit ClickRateLimiter(
+        uint64_t physicsRate = 240,
+        size_t limit = static_cast<size_t>(kMaxClicksPerSecond)
+    ) : m_windowFrames(physicsRate), m_limit(limit) {}
+
+    bool accept(uint64_t frame, bool player2) {
+        auto& presses = m_presses[player2 ? 1 : 0];
+        while (!presses.empty() && presses.front() + m_windowFrames <= frame)
+            presses.pop_front();
+        if (presses.size() >= m_limit)
+            return false;
+        presses.push_back(frame);
+        return true;
+    }
+};
 
 inline std::vector<uint32_t> fixedTickFrames(
     uint32_t firstFrame,

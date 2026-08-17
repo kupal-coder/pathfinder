@@ -2,10 +2,12 @@
 
 - Search now runs against Geometry Dash's exact runtime PlayLayer and checkpoint state
 - Dual-player search and all runtime vehicle/object/trigger behavior, including 2.2
-- Runtime replay verification; mismatches log the collision object and are never exported
+- Double fresh-runtime replay verification with deterministic replay seeds and trace hashes
+- Mismatches log P1/P2, collision object transform, player position, and velocity and are never exported
 - Oriented collision geometry for rotated solids in simulator diagnostics
-- Framerate-independent 70 CPS action clock
-- Spider and swing use 70 only as a cap; constant 70 CPS pulses are limited to cube, ball, and robot
+- Framerate-independent 70 CPS action clock with an export-time rolling cap validator
+- Mode-aware scheduling adapts immediately after portals; spider and swing use 70 only as a cap
+- Constant 70 CPS pulses are limited to cube, ball, and robot
 - Feature-focused manual acceptance levels and scheduler/geometry regression tests
 
 # beta 24

@@ -10,6 +10,16 @@
 	"name": "Pathfinder",
 	"developer": "camila314",
 	"version": "v1.0.0-beta.250",
+	"settings": {
+		"search-seed": {
+			"name": "Deterministic Search Seed",
+			"description": "Use 0 for a random seed. Set a positive value to reproduce a search and verification run.",
+			"type": "int",
+			"default": 0,
+			"min": 0,
+			"max": 2147483647
+		}
+	},
 	"dependencies": {
 		"geode.node-ids": {
 			"id": "geode.node-ids",

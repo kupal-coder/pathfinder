@@ -35,12 +35,34 @@ public:
         getChildByIDRecursive("stop")->setVisible(false);
 
         auto verification = verifyInGame(m_level, macro);
+        if (verification.completed) {
+            // A second fresh attempt catches random-seed, trigger-reset, and
+            // stale-object-state bugs before a replay reaches the export UI.
+            auto repeat = verifyInGame(m_level, macro);
+            if (!repeat.completed) {
+                verification = std::move(repeat);
+            } else if (repeat.traceHash != verification.traceHash) {
+                const auto firstHash = verification.traceHash;
+                const auto repeatHash = repeat.traceHash;
+                verification = std::move(repeat);
+                verification.completed = false;
+                verification.error = fmt::format(
+                    "runtime trace mismatch ({:016x} != {:016x})",
+                    firstHash, repeatHash
+                );
+            }
+        }
         if (!verification.completed) {
             if (verification.died) {
                 log::error(
-                    "Path rejected: game collision at frame {}, object ID {} at ({:.3f}, {:.3f})",
-                    verification.frame, verification.objectID,
-                    verification.objectX, verification.objectY
+                    "Path rejected: P{} collision at frame {}; object ID {} at "
+                    "({:.3f}, {:.3f}), rotation {:.3f}, scale ({:.3f}, {:.3f}); "
+                    "player ({:.3f}, {:.3f}), y-velocity {:.6f}",
+                    verification.player2 ? 2 : 1, verification.frame,
+                    verification.objectID, verification.objectX, verification.objectY,
+                    verification.objectRotation, verification.objectScaleX,
+                    verification.objectScaleY, verification.playerX,
+                    verification.playerY, verification.playerYVelocity
                 );
             } else {
                 log::error("Path rejected at frame {}: {}", verification.frame, verification.error);
@@ -49,10 +71,14 @@ public:
             const auto reason = verification.died
                 ? fmt::format(
                     "The runtime-searched path died during fresh verification.\n"
-                    "Frame: {}  Object: {}\nPosition: ({:.1f}, {:.1f})\n\n"
+                    "P{}  Frame: {}  Object: {}\n"
+                    "Object: ({:.1f}, {:.1f}) rot {:.1f}\n"
+                    "Player: ({:.1f}, {:.1f})\n\n"
                     "The unsafe replay was not exported.",
-                    verification.frame, verification.objectID,
-                    verification.objectX, verification.objectY
+                    verification.player2 ? 2 : 1, verification.frame,
+                    verification.objectID, verification.objectX,
+                    verification.objectY, verification.objectRotation,
+                    verification.playerX, verification.playerY
                 )
                 : fmt::format(
                     "The path could not be verified in Geometry Dash.\n{}\n\n"

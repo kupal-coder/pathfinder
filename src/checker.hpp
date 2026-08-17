@@ -15,6 +15,14 @@ struct VerificationResult {
     int objectID = 0;
     float objectX = 0;
     float objectY = 0;
+    float objectRotation = 0;
+    float objectScaleX = 1;
+    float objectScaleY = 1;
+    bool player2 = false;
+    float playerX = 0;
+    float playerY = 0;
+    double playerYVelocity = 0;
+    uint64_t traceHash = 1469598103934665603ull;
     std::string error;
 };
 
