@@ -21,6 +21,11 @@ Full support up to 1.7, partial up to 1.9. This code is not currently licensed f
 | `src/main.cpp` | The in-game UI. |
 | `src/debug.cpp` | Editor overlay for comparing simulated and real trajectories. |
 
+## Building from a phone
+
+No PC needed -- GitHub Actions builds it and you drive it from a browser. See
+[BUILDING-ON-MOBILE.md](BUILDING-ON-MOBILE.md).
+
 ## Building and testing without the game
 
 The simulator and the search engine have no dependency on Geode or on GD, so
