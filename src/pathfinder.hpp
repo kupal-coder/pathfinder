@@ -52,6 +52,14 @@ struct PathfindResult {
 	double percent = 0.0;
 	/// Human-readable failure reason, empty on success.
 	std::string error;
+	/**
+	 * Set when the level contained objects the simulator has no real hitbox
+	 * for. They are simulated as solid blocks, so the route is not guaranteed
+	 * to match the game and the macro must not be presented as a certain solve.
+	 */
+	bool approximate = false;
+	/// Human-readable description of what was approximated.
+	std::string approximation;
 };
 
 /**

@@ -1,6 +1,7 @@
 #pragma once
 #include "search.hpp"
 #include "pathfinder.hpp"
+#include "cps.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -60,10 +61,14 @@ public:
 
 		m_length = m_levels.front()->length;
 		m_objectCount = m_levels.front()->objectCount;
+		m_unknown = m_levels.front()->unknownObjects;
 	}
 
 	float length() const { return m_length; }
 	size_t objectCount() const { return m_objectCount; }
+
+	/// Objects simulated with a guessed hitbox because their id is unknown.
+	UnknownObjectLog const& unknownObjects() const { return m_unknown; }
 
 	struct Outcome {
 		InputTape tape;
@@ -247,6 +252,16 @@ private:
 		 */
 		int step = thorough ? 1 : 4;
 
+		/*
+		 * Click rate cap.
+		 *
+		 * A press/release pair closer together than this would exceed 70 CPS,
+		 * which no real bot can reproduce. The interval comes from a fixed
+		 * 1/70 s timestep rather than the frame count, so the limit means the
+		 * same thing at any physics rate. See cps.hpp.
+		 */
+		int const minGap = pf::minToggleInterval();
+
 		std::vector<Pattern> patterns;
 		patterns.reserve(static_cast<size_t>(chunk) * 4 + 2);
 		patterns.push_back({-2, -1});
@@ -255,15 +270,16 @@ private:
 			patterns.push_back({f, -1});
 			if (thorough) {
 				for (int d : {2, 4, 8}) {
-					if (f + d < chunk)
+					if (d >= minGap && f + d < chunk)
 						patterns.push_back({f, f + d});
 				}
 			} else {
 				// A cube jump is a press/release pair; keep one short pulse
 				// even in the sparse set so jumps remain reachable in a single
 				// round.
-				if (f + 4 < chunk)
-					patterns.push_back({f, f + 4});
+				int pulse = std::max(4, minGap);
+				if (f + pulse < chunk)
+					patterns.push_back({f, f + pulse});
 			}
 		}
 
@@ -290,10 +306,21 @@ private:
 					bool pressed = parent.pressed;
 					InputTape tape = parent.tape;
 
+					// Reject a pattern whose first toggle would land too soon
+					// after the parent's last one, across the chunk boundary.
+					if (pat.first >= 0 &&
+						tape.wouldExceedRate(
+							static_cast<uint32_t>(parent.frame + pat.first), minGap))
+						continue;
+
 					if (pat.first == -2 && !pressed) {
+						if (tape.wouldExceedRate(static_cast<uint32_t>(parent.frame), minGap))
+							continue;
 						pressed = true;
 						tape.toggle(static_cast<uint32_t>(parent.frame));
 					} else if (pat.first == -1 && pressed) {
+						if (tape.wouldExceedRate(static_cast<uint32_t>(parent.frame), minGap))
+							continue;
 						pressed = false;
 						tape.toggle(static_cast<uint32_t>(parent.frame));
 					}
@@ -379,6 +406,7 @@ private:
 	std::vector<std::unique_ptr<Level>> m_levels;
 	float m_length = 0.0f;
 	size_t m_objectCount = 0;
+	UnknownObjectLog m_unknown;
 };
 
 } // namespace pf

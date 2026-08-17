@@ -1,5 +1,6 @@
 #pragma once
 #include <util.hpp>
+#include <UnknownObjects.hpp>
 #include <unordered_map>
 #include <cstring>
 #include <optional>
@@ -27,7 +28,8 @@ struct Object : public Entity {
     virtual void collide(Player&) const;
 
     /// Create an object from a given level string mapping.
-    static std::optional<ObjectContainer> create(std::unordered_map<int, std::string>&& ob);
+    /// `outUnknown`, when given, records ids that fell back to a guessed hitbox.
+    static std::optional<ObjectContainer> create(std::unordered_map<int, std::string>&& ob, UnknownObjectLog* outUnknown = nullptr);
 };
 
 /**

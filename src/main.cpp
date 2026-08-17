@@ -89,7 +89,15 @@ public:
             return;
         }
 
-        if (result.solved) {
+        // A route computed against a world we could not fully model is not a
+        // verified solve. Saying "Solved!" there would be the worst outcome:
+        // the user has no way to tell the macro will kill them until it does.
+        if (result.approximate) {
+            setStatus(result.solved ? "Route found (unverified)" : "Partial route");
+            setDetail(result.approximation.empty()
+                ? "Level uses features the simulator cannot model"
+                : result.approximation);
+        } else if (result.solved) {
             setStatus("Solved!");
             setDetail("Saved to your macro library");
         } else {

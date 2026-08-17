@@ -43,6 +43,19 @@ void Level::initLevelSettings(std::string const& lvlSettings, Player& player) {
 
 	player.floor = 0;
 	player.ceiling = player.vehicle.bounds;
+
+	if (atoi(get_or("kA8", "0")))
+		noteUnsupported("dual");
+
+	if (!isVehicleSupported(player.vehicle.type))
+		noteUnsupported(vehicleName(player.vehicle.type));
+}
+
+void Level::noteUnsupported(std::string const& name) {
+	for (auto const& f : unsupportedFeatures)
+		if (f == name)
+			return;
+	unsupportedFeatures.push_back(name);
 }
 
 Level::Level(std::string const& lvlString) {
@@ -72,13 +85,33 @@ Level::Level(std::string const& lvlString) {
 				obj[atoi(k.c_str())] = v;
 		}
 
+		// Detect features we cannot model, by id, while the fields are still
+		// available. Done here rather than after construction because
+		// ObjectContainer is memcpy-based type erasure and Release builds are
+		// compiled -fno-rtti, so the concrete type cannot be recovered later.
+		{
+			int rawId = atoi(obj[1].c_str());
+			char const* unsupported = nullptr;
+			switch (rawId) {
+				case 745:  unsupported = "robot"; break;
+				case 1331: unsupported = "spider"; break;
+				case 1933: unsupported = "swing"; break;
+				case 286:  case 287: unsupported = "dual"; break;
+				case 747:  case 749: unsupported = "teleport portal"; break;
+				case 1704: case 1751: unsupported = "dash orb"; break;
+				default: break;
+			}
+			if (unsupported)
+				noteUnsupported(unsupported);
+		}
+
 		if (obj[1] == "31") {
 			initLevelSettings(objstr, player);
 			player.pos.x = stod_def(obj[2], 0);
 			player.pos.y = stod_def(obj[3], 0);
 		}
 
-		if (auto ob_o = Object::create(std::move(obj))) {
+		if (auto ob_o = Object::create(std::move(obj), &unknownObjects)) {
 			auto ob = ob_o.value();
 
 			// Unique ID

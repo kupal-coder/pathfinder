@@ -2,6 +2,8 @@
 #include <Object.hpp>
 #include <Player.hpp>
 #include <StateHistory.hpp>
+#include <UnknownObjects.hpp>
+#include <string>
 #include <vector>
 
 
@@ -13,6 +15,8 @@
 class Level {
 	/// Called by constructor, applies level settings to the initial player state
 	void initLevelSettings(std::string const& lvlSettings, Player& player);
+	/// Record an unsupported feature name, ignoring duplicates.
+	void noteUnsupported(std::string const& name);
  public:
  	/**
  	 * Player state history.
@@ -45,6 +49,30 @@ class Level {
 	std::vector<Section> sections;
 
 	float length = 0.0;
+
+	/**
+	 * Objects whose id the simulator does not have a real hitbox for.
+	 *
+	 * These are simulated as solid 30x30 blocks rather than skipped -- see the
+	 * fallback in Object::create. They are recorded so the search can report
+	 * that the world was modelled approximately instead of silently claiming a
+	 * clean solve.
+	 */
+	UnknownObjectLog unknownObjects;
+
+	/**
+	 * Features present in the level that the simulator cannot model.
+	 *
+	 * Detected at parse time so the search can decline to claim a solve rather
+	 * than producing a route that is confidently wrong. Each entry is a short
+	 * human-readable name such as "spider" or "dual".
+	 */
+	std::vector<std::string> unsupportedFeatures;
+
+	/// True when the level uses nothing outside what the simulator models.
+	bool fullySupported() const {
+		return unsupportedFeatures.empty() && unknownObjects.empty();
+	}
 
  	static constexpr uint32_t sectionSize = 100;
  	bool debug = false;

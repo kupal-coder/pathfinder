@@ -67,6 +67,16 @@ PathfindResult pathfind(
 		result.percent = outcome.percent;
 		result.macro = buildReplay(outcome.tape, options.level, outcome.percent);
 
+		// A level containing objects we could not model is not a confident
+		// solve, even when the search reaches the end: the real game may put
+		// geometry where the simulator guessed a plain block. Say so rather
+		// than handing over a macro that looks verified.
+		auto const& unknown = engine.unknownObjects();
+		if (!unknown.empty()) {
+			result.approximate = true;
+			result.approximation = unknown.summary();
+		}
+
 		if (result.macro.empty() && !outcome.tape.toggles.empty())
 			result.error = "Failed to encode the macro.";
 		else if (!outcome.solved && !stop)
