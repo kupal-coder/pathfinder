@@ -1,4 +1,5 @@
 #include <Object.hpp>
+#include <OBB.hpp>
 #include <Player.hpp>
 #include <Level.hpp>
 #include <string>
@@ -31,7 +32,46 @@ std::vector<int> unroll(std::vector<range> ranges) {
 		if (id == i) \
 			return ObjectContainer(type({w, h}, std::move(ob)));
 
-std::optional<ObjectContainer> Object::create(std::unordered_map<int, std::string>&& ob) {
+/**
+ * Ids that are known to be safe to ignore: decoration, visual-only triggers and
+ * other objects with no collision.
+ *
+ * Everything NOT in this set that is also not in the tables below is treated as
+ * potentially solid rather than skipped -- see the fallback at the end of
+ * `create`. Dropping an unknown object is what let the search plan routes
+ * through real geometry.
+ */
+static bool isKnownNonCollidable(int id) {
+	// Triggers occupy a contiguous block of ids and never collide.
+	switch (id) {
+		case 31:                     // start position marker
+		case 749: case 750: case 751: case 752: // arrow/decor markers
+		case 29: case 30:            // background / ground colour
+		case 104: case 105:          // pulse, alpha
+		case 221: case 717: case 718: case 743: case 744:
+		case 899: case 900: case 915:
+		case 901: case 1006: case 1007: case 1049: case 1268:
+		case 1346: case 1347: case 1520: case 1585: case 1595:
+		case 1611: case 1612: case 1613: case 1616: case 1811:
+		case 1812: case 1814: case 1815: case 1817: case 1818:
+		case 1819: case 1912: case 1913: case 1914: case 1915:
+		case 1916: case 1917: case 1918: case 1919: case 1932:
+		case 1934: case 1935:
+			return true;
+		default:
+			break;
+	}
+
+	// Text, particles, and the large decorative id ranges.
+	if (id == 914) return true;               // text object
+	if (id >= 1585 && id <= 1615) return true; // misc triggers
+	if (id >= 2900 && id <= 2999) return true; // 2.2 trigger block
+	if (id >= 3600 && id <= 3999) return true; // 2.2 trigger block
+
+	return false;
+}
+
+std::optional<ObjectContainer> Object::create(std::unordered_map<int, std::string>&& ob, UnknownObjectLog* outUnknown) {
 	// Level strings from the wild are frequently truncated or contain junk
 	// fields. A throw here used to abort the entire pathfind and hand the user
 	// an empty macro with no explanation, so unparseable objects are skipped.
@@ -141,7 +181,7 @@ std::optional<ObjectContainer> Object::create(std::unordered_map<int, std::strin
 	objs(({ 67 }), Pad, 25, 6)
 	objs(({ 36, 84, 141, 1022, 1330, 1333 }), Orb, 36, 36)
 
-	objs(({ 12, 13, 47, 111 , 660 }), VehiclePortal, 34, 86)
+	objs(({ 12, 13, 47, 111, 660, 745, 1331, 1933 }), VehiclePortal, 34, 86)
 	objs(({ 10, 11 }), GravityPortal, 25, 75)
 
 	objs(({ 99, 101 }), SizePortal, 31, 90)
@@ -170,8 +210,31 @@ std::optional<ObjectContainer> Object::create(std::unordered_map<int, std::strin
 	}), Slope, 60, 30)
 	objs(({ 364, 366, 1718 }), SlopeHazard, 60, 30);
 
-	// Any block that isnt' defined is ignored
-	return {};
+	/*
+	 * Fallback for unrecognised ids.
+	 *
+	 * Previously this returned {} and the parser dropped the object entirely,
+	 * so anything the tables above did not cover -- every 2.2 block, for one --
+	 * was invisible to the search. Routes were planned straight through solid
+	 * geometry and the resulting macro died instantly.
+	 *
+	 * An unknown object is now assumed to be a solid 30x30 block, which is the
+	 * standard grid cell and by far the most common case. Being wrong in this
+	 * direction costs a possibly-missed route; being wrong in the other
+	 * direction costs a macro that kills you, so the conservative choice is to
+	 * treat unknown geometry as real.
+	 *
+	 * Callers are told about it through `outUnknown` so the search can refuse to
+	 * report a confident solve on a world it could not fully model.
+	 */
+	if (isKnownNonCollidable(id))
+		return {};
+
+	if (outUnknown) {
+		outUnknown->add(id, stod_def(ob[2]), stod_def(ob[3]));
+	}
+
+	return ObjectContainer(Block({30, 30}, std::move(ob)));
 }
 
 
@@ -192,8 +255,33 @@ Object::Object(Vec2D s, std::unordered_map<int, std::string>&& fields) {
 }
 
 bool Object::touching(Player const& player) const {
-	int r = std::abs(rotation);
-	return intersects((r == 0 || r == 90 || r == 180 || r == 270) ? player.unrotatedHitbox() : (Entity&)player);
+	/*
+	 * Rotated objects are tested with a true oriented box.
+	 *
+	 * This used to compare axis-aligned rects and only respect rotation at
+	 * exact multiples of 90 degrees; at any other angle the object was tested
+	 * as though it were unrotated, which both missed real collisions and
+	 * invented false ones near the corners of the bounding box. Either way the
+	 * search modelled a shape the game does not have.
+	 *
+	 * Right angles keep the original fast path: the shapes are identical there
+	 * and the existing rect test is cheaper, which matters because this runs
+	 * for every object near the player on every simulated frame.
+	 */
+	int r = std::abs(static_cast<int>(rotation));
+	bool rightAngle = (r % 90) == 0;
+
+	if (rightAngle)
+		return intersects(player.unrotatedHitbox());
+
+	OBB self(pos, {size.x / 2, size.y / 2}, deg2rad(rotation));
+	OBB hit(player.pos, {player.size.x / 2, player.size.y / 2}, 0.f);
+
+	// Cheap reject before the full separating-axis test.
+	if (!self.bounds().intersects(player.unrotatedHitbox()))
+		return false;
+
+	return ::intersects(self, hit);
 }
 
 void Object::collide(Player&) const {

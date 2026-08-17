@@ -18,6 +18,18 @@ VehiclePortal::VehiclePortal(Vec2D size, std::unordered_map<int, std::string>&& 
 		case 660:
 			type = VehicleType::Wave;
 			break;
+		// Declared but not simulated. Mapping these to Cube would silently
+		// produce a wrong route; the level parser detects them instead and the
+		// search refuses to claim a confident solve.
+		case 745:
+			type = VehicleType::Robot;
+			break;
+		case 1331:
+			type = VehicleType::Spider;
+			break;
+		case 1933:
+			type = VehicleType::Swing;
+			break;
 		default:
 			type = VehicleType::Cube;
 			break;
