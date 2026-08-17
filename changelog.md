@@ -1,3 +1,20 @@
+# v1.2.0
+
+## Built-in macro library
+- Solved macros are now **saved automatically** into the mod's own library. No
+  more being dropped into a file picker aimed at another mod's folder just to
+  keep a result.
+- New library browser, opened from the level screen, listing every macro
+  newest-first with its completion percentage, duration and input count.
+  Green means solved, orange means partial.
+- Each macro can be exported, renamed or deleted. Export offers a one-tap send
+  to a detected bot's replay folder, or any folder you choose.
+- Saved macros carry proper metadata (level name, id, duration, progress), so
+  the library shows real information instead of guessing from the filename.
+- Saving the same level twice no longer overwrites the earlier attempt; the new
+  file is suffixed instead.
+- Requires Geode 5.9.0.
+
 # v1.1.0
 
 Renamed to **Path Finding Pro**.

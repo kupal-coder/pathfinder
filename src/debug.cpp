@@ -10,6 +10,7 @@ using namespace geode::utils::file;
 #include <Geode/modify/EditorPauseLayer.hpp>
 #include <Geode/modify/EditLevelLayer.hpp>
 #include <gdr/gdr.hpp>
+#include "replay.hpp"
 #include "subprocess.hpp"
 
 #ifndef DEBUG_MODE
@@ -23,10 +24,9 @@ std::vector<CCPoint> s_inputPoints;
 std::string realTxt = "";
 static int frames = 0;
 
-class Replay2 : public gdr::Replay<Replay2, gdr::Input<"">> {
- public:
-    Replay2() : Replay("Path Finding Pro", 1){}
-};
+// Shared definition so the bot name and input layout cannot drift between the
+// solver, the macro library and this overlay.
+using Replay2 = PathfinderReplay;
 
 
 #ifdef _WIN32

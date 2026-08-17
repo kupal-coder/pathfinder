@@ -29,6 +29,9 @@ jobs:
       - name: Search correctness
         run: ./build-sim/gd-sim-searchtest
 
+      - name: Macro library naming
+        run: ./build-sim/gd-sim-librarytest
+
       - name: Search gauntlet
         run: ./build-sim/gd-sim-searchbench
 
@@ -54,3 +57,6 @@ jobs:
 
       - name: Search correctness
         run: ./build-asan/gd-sim-searchtest
+
+      - name: Macro library naming
+        run: ./build-asan/gd-sim-librarytest

@@ -23,6 +23,13 @@ struct PathfindProgress {
 	bool solved = false;
 };
 
+/// Level identity, embedded in the saved replay so the macro library can list
+/// it with real information instead of guessing from the filename.
+struct LevelIdentity {
+	std::string name;
+	uint32_t id = 0;
+};
+
 struct PathfindOptions {
 	/// Worker threads. 0 picks a sensible default from the hardware.
 	unsigned threads = 0;
@@ -32,6 +39,8 @@ struct PathfindOptions {
 	unsigned chunkFrames = 24;
 	/// Give up after this many rounds without improvement. 0 disables.
 	uint64_t stallLimit = 20000;
+	/// Recorded into the replay metadata.
+	LevelIdentity level;
 };
 
 struct PathfindResult {

@@ -15,6 +15,9 @@ Full support up to 1.7, partial up to 1.9. This code is not currently licensed f
 | `src/search.hpp` | Search primitives: input tapes, state keys, scoring. |
 | `src/engine.hpp` | The search engine. Header-only, no Geode dependency. |
 | `src/pathfinder.cpp` | Bridges the engine to the `.gdr2` replay format. |
+| `src/replay.hpp` | Shared `.gdr2` replay type used by every component. |
+| `src/library.cpp` | The macro library: save, list, rename, delete, export. |
+| `src/LibraryPopup.cpp` | The in-game macro library browser. |
 | `src/main.cpp` | The in-game UI. |
 | `src/debug.cpp` | Editor overlay for comparing simulated and real trajectories. |
 
@@ -29,10 +32,15 @@ cmake --build build-sim -j"$(nproc)"
 
 ./build-sim/gd-sim-golden verify   # physics regression traces
 ./build-sim/gd-sim-searchtest      # search correctness
+./build-sim/gd-sim-librarytest     # macro library naming rules
 ./build-sim/gd-sim-searchbench     # search benchmark gauntlet
 ```
 
-`ctest` runs the first two. CI runs all three, plus an ASan/UBSan build.
+`ctest` runs the first three. CI runs all four, plus an ASan/UBSan build.
+
+Note that `librarytest` keeps its own copy of the naming logic from
+`src/library.cpp` so it can run without Geode. If you change the sanitising or
+de-duplication rules, change both.
 
 ### Golden traces
 

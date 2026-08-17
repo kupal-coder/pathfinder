@@ -4,7 +4,10 @@
 #include <Geode/modify/EditLevelLayer.hpp>
 #include <Geode/modify/LevelInfoLayer.hpp>
 #include <UIBuilder.hpp>
+#include <Geode/ui/Notification.hpp>
 #include "pathfinder.hpp"
+#include "library.hpp"
+#include "LibraryPopup.hpp"
 #include <future>
 #include <mutex>
 
@@ -15,6 +18,7 @@ class PathfinderNode : public CCLayerColor {
     std::atomic_bool m_stop = false;
     std::future<PathfindResult> m_result;
     std::string m_levelName;
+    uint32_t m_levelId = 0;
 
     /// Progress is published from the search thread and read on the main
     /// thread each frame, so it is guarded rather than passed through a pile
@@ -24,9 +28,9 @@ class PathfinderNode : public CCLayerColor {
     bool m_finalized = false;
 
 public:
-    static PathfinderNode* create(std::string const& levelName, std::string const& lvlString) {
+    static PathfinderNode* create(std::string const& levelName, uint32_t levelId, std::string const& lvlString) {
         auto node = new PathfinderNode();
-        if (node && node->init(levelName, lvlString)) {
+        if (node && node->init(levelName, levelId, lvlString)) {
             node->autorelease();
             return node;
         }
@@ -73,44 +77,44 @@ public:
             return;
         }
 
-        if (result.solved) {
-            setStatus("Solved!");
-            setDetail("Ready to export");
-        } else {
-            setStatus("Partial route");
-            setDetail(fmt::format("Reached {:.2f}% - macro still exportable", result.percent));
+        // Save straight into the mod's own library. Previously the only way to
+        // keep a result was to immediately drive a file picker into some other
+        // mod's folder; now the macro is safe as soon as it exists, and
+        // exporting is a separate, optional step.
+        auto saved = macrolib::save(result.macro, m_levelName);
+
+        if (!saved) {
+            setStatus("Could not save");
+            setDetail(saved.unwrapErr());
+            return;
         }
 
-        auto macro = result.macro;
-        auto callback = [this, macro](this auto self) -> arc::Future<void> {
-            auto saveDir = Mod::get()->getSaveDir();
-            if (Loader::get()->isModLoaded("eclipse.eclipse-menu")) {
-                saveDir = Loader::get()->getLoadedMod("eclipse.eclipse-menu")->getSaveDir() / "replays";
-            }
+        if (result.solved) {
+            setStatus("Solved!");
+            setDetail("Saved to your macro library");
+        } else {
+            setStatus("Partial route");
+            setDetail(fmt::format("Reached {:.2f}% - saved to library", result.percent));
+        }
 
-            if (!exists(saveDir)) {
-                create_directories(saveDir);
-            }
+        auto menu = getChildByID("menu");
 
-            FilePickOptions opts(
-                saveDir / fmt::format("{}.gdr2", m_levelName), {{
-                std::string("Macro File"),
-                std::unordered_set {std::string("gdr2")}
-            }});
+        Build<ButtonSprite>::create("Open Library", "bigFont.fnt", "GJ_button_01.png", .8f)
+            .scale(.7f)
+            .intoMenuItem([this](CCMenuItemSpriteExtra*) {
+                LibraryPopup::create()->show();
+                removeFromParentAndCleanup(true);
+            })
+            .move(-52, -40)
+            .parent(menu);
 
-            if (auto path = co_await pick(PickMode::SaveFile, opts); path.isOk() && path.unwrap().has_value()) {
-                (void)writeBinary(*path.unwrap(), macro);
-                queueInMainThread([this] {
-                    removeFromParentAndCleanup(true);
-                });
-            }
-        };
-
-        Build<ButtonSprite>::create("Export", "bigFont.fnt", "GJ_button_01.png")
-            .intoMenuItem(async::wrapSpawn(callback))
-            .scale(0.8)
-            .move(0, -40)
-            .parent(getChildByID("menu"));
+        Build<ButtonSprite>::create("Done", "bigFont.fnt", "GJ_button_04.png", .8f)
+            .scale(.7f)
+            .intoMenuItem([this](CCMenuItemSpriteExtra*) {
+                removeFromParentAndCleanup(true);
+            })
+            .move(52, -40)
+            .parent(menu);
     }
 
     void keyBackClicked() override  {
@@ -119,17 +123,20 @@ public:
         removeFromParentAndCleanup(true);
     }
 
-    bool init(std::string const& levelName, std::string const& lvlString) {
+    bool init(std::string const& levelName, uint32_t levelId, std::string const& lvlString) {
         CCLayerColor::initWithColor({0, 0, 0, 100});
         setCascadeOpacityEnabled(true);
 
         m_levelName = levelName;
+        m_levelId = levelId;
 
-        m_result = std::async(std::launch::async, [lvlString, this]() {
+        m_result = std::async(std::launch::async, [lvlString, levelName, levelId, this]() {
             PathfindOptions options;
             // Leave a core free so the game keeps rendering while searching.
             unsigned hw = std::thread::hardware_concurrency();
             options.threads = hw > 2 ? hw - 1 : 1;
+            options.level.name = levelName;
+            options.level.id = levelId;
 
             return pathfind(lvlString, m_stop, [this](PathfindProgress const& p) {
                 std::lock_guard<std::mutex> lock(m_progressMutex);
@@ -219,7 +226,30 @@ static void startPathfinder(CCNode* parent, GJGameLevel* level) {
         return;
     }
 
-    Build<PathfinderNode>::create(level->m_levelName, lvlString).parent(parent).zOrder(100);
+    Build<PathfinderNode>::create(
+        level->m_levelName,
+        static_cast<uint32_t>(level->m_levelID.value()),
+        lvlString
+    ).parent(parent).zOrder(100);
+}
+
+/// The library button, added next to the solver button on both level screens.
+static CCMenuItemSpriteExtra* createLibraryButton() {
+    auto spr = Build<BasedButtonSprite>::create(
+        CCSprite::createWithSpriteFrameName("GJ_playBtn2_001.png"),
+        BaseType::Circle,
+        4,
+        3
+    ).scale(0.8);
+
+    spr->setTopRelativeScale(0.7f);
+
+    return Build<BasedButtonSprite>(spr)
+        .intoMenuItem([]() {
+            LibraryPopup::create()->show();
+        })
+        .id("pathfinder-library-button")
+        .collect();
 }
 
 class $modify(EditLevelLayer) {
@@ -242,8 +272,14 @@ class $modify(EditLevelLayer) {
           .parent(this)
           .id("pathfinder-menu")
           .matchPos(getChildByIDRecursive("delete-button"))
-          .move(-45, 0);
-
+          .move(-45, 0)
+          .with([](CCMenu* menu) {
+              // Sits just below the solver button so both are reachable
+              // without hunting through another mod's menus.
+              auto lib = createLibraryButton();
+              lib->setPosition({0, -45});
+              menu->addChild(lib);
+          });
 
         return true;
     }
@@ -268,6 +304,14 @@ class $modify(LevelInfoLayer) {
           .parent(getChildByID("other-menu"))
           .matchPos(getChildByIDRecursive("list-button"))
           .move(0, 45);
+
+        if (auto otherMenu = getChildByID("other-menu")) {
+            auto lib = createLibraryButton();
+            Build(lib)
+                .parent(otherMenu)
+                .matchPos(getChildByIDRecursive("list-button"))
+                .move(0, 90);
+        }
 
         return true;
     }

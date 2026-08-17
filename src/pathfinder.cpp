@@ -2,15 +2,13 @@
 #include "engine.hpp"
 #include "search.hpp"
 
+#include "replay.hpp"
+
 #include <Level.hpp>
-#include <gdr/gdr.hpp>
 
+#include <cmath>
+#include <cstdio>
 #include <exception>
-
-class Replay2 : public gdr::Replay<Replay2, gdr::Input<"">> {
- public:
-	Replay2() : Replay("Path Finding Pro", 1) {}
-};
 
 /**
  * Convert a solved input tape into a .gdr2 replay.
@@ -20,15 +18,29 @@ class Replay2 : public gdr::Replay<Replay2, gdr::Input<"">> {
  * long level the planned inputs landed at nonsense frames near the start and
  * quietly did nothing.
  */
-static std::vector<uint8_t> buildReplay(pf::InputTape const& tape) {
-	Replay2 output;
+static std::vector<uint8_t> buildReplay(
+	pf::InputTape const& tape,
+	LevelIdentity const& level,
+	double percent) {
+
+	PathfinderReplay output;
 	output.inputs.reserve(tape.toggles.size());
 
 	bool pressed = false;
+	uint32_t lastFrame = 0;
 	for (uint32_t frame : tape.toggles) {
 		pressed = !pressed;
+		lastFrame = frame;
 		output.inputs.push_back(gdr::Input(frame, 1, false, pressed));
 	}
+
+	// Metadata so the macro library can show what this file actually is
+	// without having to re-simulate it.
+	output.levelInfo = gdr::Level(level.name, level.id);
+	output.duration = static_cast<float>(lastFrame / 240.0);
+	char desc[64];
+	std::snprintf(desc, sizeof(desc), "%.2f%% - Path Finding Pro", percent);
+	output.description = desc;
 
 	return output.exportData().unwrapOr({});
 }
@@ -53,7 +65,7 @@ PathfindResult pathfind(
 
 		result.solved = outcome.solved;
 		result.percent = outcome.percent;
-		result.macro = buildReplay(outcome.tape);
+		result.macro = buildReplay(outcome.tape, options.level, outcome.percent);
 
 		if (result.macro.empty() && !outcome.tape.toggles.empty())
 			result.error = "Failed to encode the macro.";

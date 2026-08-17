@@ -47,7 +47,12 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     target_include_directories(gd-sim-searchbench PRIVATE include test ../src)
     target_link_libraries(gd-sim-searchbench PRIVATE Threads::Threads)
 
+    # Macro library naming rules (no Geode needed).
+    add_executable(gd-sim-librarytest test/librarytest.cpp)
+    set_target_properties(gd-sim-librarytest PROPERTIES INTERPROCEDURAL_OPTIMIZATION 0)
+
     enable_testing()
     add_test(NAME physics-golden COMMAND gd-sim-golden verify)
     add_test(NAME search-correctness COMMAND gd-sim-searchtest)
+    add_test(NAME library-naming COMMAND gd-sim-librarytest)
 endif()
