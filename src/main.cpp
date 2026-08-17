@@ -8,6 +8,7 @@
 #include "pathfinder.hpp"
 #include "library.hpp"
 #include "LibraryPopup.hpp"
+#include "Verifier.hpp"
 #include <future>
 #include <mutex>
 
@@ -89,10 +90,41 @@ public:
             return;
         }
 
-        // A route computed against a world we could not fully model is not a
-        // verified solve. Saying "Solved!" there would be the worst outcome:
-        // the user has no way to tell the macro will kill them until it does.
-        if (result.approximate) {
+        /*
+         * Verify the macro against the real game before calling it solved.
+         *
+         * The search runs on gd-sim, which is a reimplementation. The only
+         * opinion that matters is the game's, so a claimed solve is replayed
+         * through the actual PlayLayer -- real objects, real collision
+         * callbacks. If the game kills the player where the simulator did not,
+         * the object responsible is named and the macro is not presented as
+         * verified.
+         */
+        if (result.solved && verificationAvailable()) {
+            pf::InputTape tape;
+            tape.toggles = result.toggles;
+
+            auto report = verifyInGame(tape);
+
+            if (report.ok()) {
+                setStatus("Solved and verified");
+                setDetail("Replayed in game with zero deaths");
+            } else if (report.outcome == VerifyOutcome::Died) {
+                // Log the colliding object so the gap in the model is findable.
+                log::warn("{}", report.describe());
+                setStatus("Rejected: dies in game");
+                setDetail(report.killerObjectId
+                    ? fmt::format("object {} at ({:.0f}, {:.0f})",
+                        report.killerObjectId, report.killerX, report.killerY)
+                    : fmt::format("died at x {:.0f}", report.x));
+            } else {
+                setStatus("Route found (unverified)");
+                setDetail(verifyOutcomeName(report.outcome));
+            }
+        } else if (result.approximate) {
+            // A route computed against a world we could not fully model is not
+            // a verified solve. Saying "Solved!" would be the worst outcome:
+            // the user cannot tell the macro will kill them until it does.
             setStatus(result.solved ? "Route found (unverified)" : "Partial route");
             setDetail(result.approximation.empty()
                 ? "Level uses features the simulator cannot model"

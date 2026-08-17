@@ -66,6 +66,7 @@ PathfindResult pathfind(
 		result.solved = outcome.solved;
 		result.percent = outcome.percent;
 		result.macro = buildReplay(outcome.tape, options.level, outcome.percent);
+		result.toggles = outcome.tape.toggles;
 
 		// A level containing objects we could not model is not a confident
 		// solve, even when the search reaches the end: the real game may put

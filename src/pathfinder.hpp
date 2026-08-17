@@ -60,6 +60,9 @@ struct PathfindResult {
 	bool approximate = false;
 	/// Human-readable description of what was approximated.
 	std::string approximation;
+
+	/// The input tape, kept so the macro can be verified in game afterwards.
+	std::vector<uint32_t> toggles;
 };
 
 /**
