@@ -5,6 +5,8 @@
 #include <Geode/modify/LevelInfoLayer.hpp>
 #include <UIBuilder.hpp>
 #include "checker.hpp"
+#include <chrono>
+#include <optional>
 
 using namespace geode::prelude;
 using namespace geode::utils::file;
@@ -13,6 +15,8 @@ class PathfinderNode : public CCLayerColor {
     std::atomic_bool m_stop = false;
     std::atomic<double> m_progress = 0;
     bool m_started = false;
+    bool m_finished = false;
+    std::optional<RuntimeSearchTask> m_search;
     std::string m_levelName;
     GJGameLevel* m_level = nullptr;
 public:
@@ -28,10 +32,12 @@ public:
 
     ~PathfinderNode() {
         m_stop = true;
+        m_search.reset();
         CC_SAFE_RELEASE(m_level);
     }
 
     void finalize(std::vector<uint8_t> macro) {
+        m_finished = true;
         getChildByIDRecursive("stop")->setVisible(false);
 
         auto verification = verifyInGame(m_level, macro);
@@ -140,19 +146,37 @@ public:
         Build(this).initTouch().schedule([this](float) {
             Build(this).intoChildRecurseID<CCLabelBMFont>("percent")
                 .string(fmt::format("{:.2f}%", m_progress).c_str());
+            if (m_finished)
+                return;
 
-            if (!m_started) {
-                m_started = true;
-                try {
-                    auto macro = pathfindInGame(m_level, m_stop, [this](double value) {
+            try {
+                if (!m_started) {
+                    m_started = true;
+                    m_search.emplace(pathfindInGame(m_level, m_stop, [this](double value) {
                         if (m_progress < value)
                             m_progress = value;
-                    });
-                    finalize(std::move(macro));
-                } catch (std::exception const& error) {
-                    log::error("Runtime pathfinder failed: {}", error.what());
-                    finalize({});
+                    }));
                 }
+
+                // Keep search on the cocos thread (required by PlayLayer), but
+                // resume only within a small frame budget so Stop/Back and the
+                // progress UI remain responsive.
+                const auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(4);
+                bool done = false;
+                do {
+                    done = m_search->resume();
+                } while (!done && std::chrono::steady_clock::now() < deadline);
+
+                if (done) {
+                    auto macro = m_search->takeResult();
+                    m_search.reset();
+                    finalize(std::move(macro));
+                }
+            } catch (std::exception const& error) {
+                log::error("Runtime pathfinder failed: {}", error.what());
+                m_search.reset();
+                finalize({});
             }
         });
 

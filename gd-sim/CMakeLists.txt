@@ -29,4 +29,12 @@ if (BUILD_TESTING)
     add_executable(gd-sim-input-scheduler-test test/input_scheduler.cpp)
     target_include_directories(gd-sim-input-scheduler-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
     add_test(NAME gd-sim-input-scheduler COMMAND gd-sim-input-scheduler-test)
+
+    find_package(Python3 COMPONENTS Interpreter)
+    if (Python3_Interpreter_FOUND)
+        add_test(
+            NAME pathfinder-acceptance-fixtures
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../tools/validate_test_levels.py
+        )
+    endif()
 endif()

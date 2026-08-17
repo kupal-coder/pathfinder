@@ -182,18 +182,22 @@ VerificationResult verifyInGame(GJGameLevel* level, std::vector<uint8_t> const& 
     return result;
 }
 
-std::vector<uint8_t> pathfindInGame(
+RuntimeSearchTask pathfindInGame(
     GJGameLevel* level,
     std::atomic_bool& stop,
-    std::function<void(double)> const& progress
+    std::function<void(double)> progress
 ) {
     if (!level)
-        return {};
+        co_return std::vector<uint8_t>{};
 
     auto playLayer = PlayLayer::create(level, false, false);
     if (!playLayer)
-        return {};
+        co_return std::vector<uint8_t>{};
     playLayer->retain();
+    struct LayerLifetime {
+        PlayLayer* layer;
+        ~LayerLifetime() { layer->release(); }
+    } layerLifetime {playLayer};
     playLayer->setVisible(false);
     const auto configuredSeed = Mod::get()->getSettingValue<int64_t>("search-seed");
     const uint32_t runtimeSeed = configuredSeed == 0
@@ -239,6 +243,13 @@ std::vector<uint8_t> pathfindInGame(
     };
 
     std::vector<SavedPoint> history;
+    struct CheckpointLifetime {
+        std::vector<SavedPoint>& points;
+        ~CheckpointLifetime() {
+            for (auto& point : points)
+                point.checkpoint->release();
+        }
+    } checkpointLifetime {history};
     std::vector<Event> committed;
     auto savePoint = [&](uint32_t frame, Buttons p1, Buttons p2) {
         auto checkpoint = playLayer->createCheckpoint();
@@ -438,6 +449,7 @@ std::vector<uint8_t> pathfindInGame(
                 best = std::move(trial);
             if (best.completed)
                 break;
+            co_yield true;
         }
 
         if (stop)
@@ -504,10 +516,7 @@ std::vector<uint8_t> pathfindInGame(
             output.inputs.emplace_back(event.frame, event.button, event.player2, event.down);
     }
 
-    for (auto& point : history)
-        point.checkpoint->release();
-    playLayer->release();
     if (!solved)
-        return {};
-    return output.exportData().unwrapOr({});
+        co_return std::vector<uint8_t>{};
+    co_return output.exportData().unwrapOr({});
 }
