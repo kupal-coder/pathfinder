@@ -5,7 +5,9 @@
 #include <Geode/modify/LevelInfoLayer.hpp>
 #include <UIBuilder.hpp>
 #include "checker.hpp"
+#include "pathfinder.hpp"
 #include <chrono>
+#include <future>
 #include <optional>
 #include <sstream>
 
@@ -15,10 +17,9 @@ using namespace geode::utils::file;
 class PathfinderNode : public CCLayerColor {
     std::atomic_bool m_stop = false;
     std::atomic<double> m_progress = 0;
-    SearchProgress m_searchProgress;
     bool m_finished = false;
     bool m_searchComplete = false;
-    std::optional<RuntimeSearchTask> m_search;
+    std::future<std::vector<uint8_t>> m_result;
     std::optional<RuntimeVerificationTask> m_verification;
     std::optional<VerificationResult> m_firstVerification;
     std::vector<uint8_t> m_pendingMacro;
@@ -37,7 +38,8 @@ public:
 
     ~PathfinderNode() {
         m_stop = true;
-        m_search.reset();
+        if (m_result.valid())
+            m_result.wait();
         m_verification.reset();
         CC_SAFE_RELEASE(m_level);
     }
@@ -128,26 +130,20 @@ public:
         CC_SAFE_RETAIN(m_level);
         m_levelName = levelName;
 
-        (void)lvlString;
-        // Keep camila314's rolling random-search/commit/rollback strategy, but
-        // execute every candidate against exact runtime PlayLayer checkpoints.
-        m_search.emplace(pathfindRollingInGame(m_level, m_stop,
-            [this](SearchProgress const& status) {
-                m_searchProgress = status;
-                if (m_progress < status.percent)
-                    m_progress = status.percent;
-            }));
+        // Use camila314's original gd-sim rolling random-search implementation.
+        // Runtime PlayLayer verification remains mandatory before export.
+        m_result = std::async(std::launch::async, [this, lvlString] {
+            return pathfind(lvlString, m_stop, [this](double value) {
+                if (m_progress < value)
+                    m_progress = value;
+            });
+        });
         setKeypadEnabled(true);
 
         Build(this).initTouch().schedule([this](float) {
             Build(this).intoChildRecurseID<CCLabelBMFont>("percent")
-                .string(fmt::format(
-                    "{:.2f}% | Rolling runtime search\n"
-                    "C{} S{} F{} | {:.1f}k/s",
-                    m_progress.load(), m_searchProgress.generation,
-                    m_searchProgress.statesExpanded, m_searchProgress.physicsFrames,
-                    m_searchProgress.updatesPerSecond / 1000.
-                ).c_str());
+                .string(fmt::format("{:.2f}% | Original gd-sim search",
+                    m_progress.load()).c_str());
             if (m_finished)
                 return;
 
@@ -156,13 +152,10 @@ public:
                     std::chrono::milliseconds(
                         Mod::get()->getSettingValue<int64_t>("search-frame-budget"));
                 if (!m_searchComplete) {
-                    bool done = false;
-                    do {
-                        done = m_search->resume();
-                    } while (!done && std::chrono::steady_clock::now() < deadline);
-                    if (done) {
-                        m_pendingMacro = m_search->takeResult();
-                        m_search.reset();
+                    if (m_result.valid() &&
+                        m_result.wait_for(std::chrono::seconds(0)) ==
+                            std::future_status::ready) {
+                        m_pendingMacro = m_result.get();
                         m_searchComplete = true;
                         m_verification.emplace(verifyInGameCooperative(
                             m_level, m_pendingMacro, m_stop));
@@ -204,8 +197,7 @@ public:
                     finalize(std::move(m_pendingMacro), std::move(result));
                 }
             } catch (std::exception const& error) {
-                log::error("Rolling runtime pathfinder failed: {}", error.what());
-                m_search.reset();
+                log::error("gd-sim pathfinder failed: {}", error.what());
                 m_verification.reset();
                 VerificationResult failure;
                 failure.error = error.what();

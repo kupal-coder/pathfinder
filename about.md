@@ -4,13 +4,12 @@ Auto-generate macros for levels using simulation! This mod uses a physics simula
 
 # Search and verification
 
-Pathfinding keeps camila314's original rolling random-search, partial-commit,
-and rollback strategy, but candidates are stepped through exact Geometry Dash
-`PlayLayer` checkpoints. This lets the same search strategy see dual players,
-all runtime vehicles, triggers, moved/toggled objects, portals, 2.2 mechanics,
-and modifier state without an object-ID behavior table. Every generated replay
-is then checked twice in fresh runtime layers and can only be exported after two
-matching zero-death completions.
+Pathfinding uses camila314's original `gd-sim` rolling random-search,
+partial-commit, and rollback implementation. It is fast and convenient for the
+classic mechanics supported by that simulator. Every generated replay is still
+checked twice in fresh Geometry Dash runtime layers and can only be exported
+after two matching zero-death completions. Unsupported modern mechanics may
+cause the candidate to be rejected rather than exported.
 
 # How To Use
 
