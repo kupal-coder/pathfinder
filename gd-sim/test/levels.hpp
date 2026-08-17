@@ -187,6 +187,45 @@ inline TestLevel supportedMix() {
 			lvl};
 }
 
+/// Modifier blocks (D-block, J-block) with conditional state.
+inline TestLevel modifierBlocks() {
+	std::string lvl = settings() + ground(6000);
+	// 1755 is a D-block, 1813 a J-block in 2.2.
+	for (int x = 900; x < 5000; x += 900) {
+		lvl += obj(1755, x, 15);
+		lvl += obj(1813, x + 300, 15);
+	}
+	return {"modifier_blocks",
+			"D-blocks and J-blocks. Behaviour depends on conditional state.",
+			lvl,
+			false};
+}
+
+/// A wall of assorted 2.2 object ids.
+inline TestLevel objects22() {
+	std::string lvl = settings() + ground(6000);
+	int ids[] = {1953, 1954, 1955, 1956, 2000, 2001, 2010, 2064};
+	for (int i = 0; i < 8; ++i)
+		for (int y = 15; y < 135; y += 30)
+			lvl += obj(ids[i], 800 + i * 500, y);
+	return {"objects_2_2",
+			"Walls built from 2.2 object ids the old tables had no entry for.",
+			lvl,
+			false};
+}
+
+/// Upside-down slopes.
+inline TestLevel upsideDownSlopes() {
+	std::string lvl = settings() + ground(6000) + ground(6000, 315);
+	for (int i = 0; i < 8; ++i) {
+		// Slope rotated 180 so it hangs from the ceiling.
+		lvl += rotated(289, 700 + i * 600, 285, 180);
+	}
+	return {"upside_down_slopes",
+			"Ceiling-mounted slopes rotated 180 degrees.",
+			lvl};
+}
+
 inline std::vector<TestLevel> all() {
 	return {
 		phasingWall(),
@@ -200,6 +239,9 @@ inline std::vector<TestLevel> all() {
 		dashOrbs(),
 		clickRate(),
 		supportedMix(),
+		modifierBlocks(),
+		objects22(),
+		upsideDownSlopes(),
 	};
 }
 
