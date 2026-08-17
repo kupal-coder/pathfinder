@@ -174,6 +174,10 @@ RuntimeVerificationTask verifyInGameCooperative(
     playLayer->setVisible(false);
     setRuntimeSeed(playLayer, runtimeSeed);
     playLayer->resetLevel();
+    // Hidden PlayLayers never receive onEnterTransitionDidFinish, which is
+    // where normal gameplay starts. Without this, update() advances triggers
+    // but leaves both players frozen at X=0 and every search reports 0.00%.
+    playLayer->startGame();
 
     CaptureGuard capture;
     const float step = 1.f / static_cast<float>(replay.framerate);
@@ -291,7 +295,24 @@ RuntimeSearchTask pathfindInGame(
     log::info("Pathfinder runtime seed: {}", runtimeSeed);
     setRuntimeSeed(playLayer, runtimeSeed);
     playLayer->resetLevel();
+    playLayer->startGame();
     CaptureGuard capture;
+
+    const float searchStartX = playLayer->m_player1->getPositionX();
+    const float searchEndX = playLayer->getEndPosition().x;
+    auto runtimeProgress = [&] {
+        const float gameProgress = playLayer->getCurrentPercent();
+        if (gameProgress > 0.f || std::abs(searchEndX - searchStartX) < 1.f)
+            return gameProgress;
+        auto playerProgress = [&](PlayerObject* player) {
+            return 100.f * (player->getPositionX() - searchStartX) /
+                (searchEndX - searchStartX);
+        };
+        float fallback = playerProgress(playLayer->m_player1);
+        if (playLayer->m_gameState.m_isDualMode)
+            fallback = std::min(fallback, playerProgress(playLayer->m_player2));
+        return std::clamp(fallback, 0.f, 100.f);
+    };
 
     constexpr float physicsStep = 1.f / 240.f;
     constexpr uint32_t minHorizon = 60;
@@ -682,7 +703,7 @@ RuntimeSearchTask pathfindInGame(
                         if (playLayer->m_gameState.m_isDualMode)
                             velocityPenalty += static_cast<float>(
                                 std::abs(playLayer->m_player2->m_yVelocity) * .01);
-                        candidate.score = playLayer->getCurrentPercent() * 1000.f -
+                        candidate.score = runtimeProgress() * 1000.f -
                             endDistance * .001f - velocityPenalty -
                             static_cast<float>(candidate.path->events.size()) * .1f;
                         candidate.stateHash = hash;
@@ -757,8 +778,7 @@ RuntimeSearchTask pathfindInGame(
                 return "Cube";
             };
             SearchProgress status;
-            status.percent = std::clamp<double>(
-                playLayer->getCurrentPercent(), 0., 100.);
+            status.percent = std::clamp<double>(runtimeProgress(), 0., 100.);
             status.generation = generation + 1;
             status.restart = restart;
             status.horizon = horizon;

@@ -1,6 +1,7 @@
 # beta 25
 
 - Search now runs against Geometry Dash's exact runtime PlayLayer and checkpoint state
+- Fixed hidden PlayLayers staying frozen at 0.00% by explicitly starting gameplay
 - Event-driven diversity beam search with no-input, hold, adaptive-CPS, and timed-jump templates
 - Fast-path rollouts extend promising 0-70 CPS cube/ball/robot patterns up to 960 frames
 - Dynamic branch count, beam width, obstacle horizon, deterministic restarts, and configurable 2-20 ms UI budget
