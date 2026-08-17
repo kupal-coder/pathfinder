@@ -147,13 +147,13 @@ std::optional<std::string> decodeLevelString(std::vector<uint8_t> const& bytes) 
 
     if (looksLikeLevel(raw)) return raw;
 
-    if (auto d = ZipUtils::decompressString(raw.c_str(), true, 0); looksLikeLevel(d)) return d;
-    if (auto d = ZipUtils::decompressString(raw.c_str(), false, 0); looksLikeLevel(d)) return d;
+    if (auto d = ZipUtils::decompressString(raw, true, 0); looksLikeLevel(d)) return d;
+    if (auto d = ZipUtils::decompressString(raw, false, 0); looksLikeLevel(d)) return d;
 
     auto b64 = base64Decode(raw);
     if (looksLikeLevel(b64)) return b64;
-    if (auto d = ZipUtils::decompressString(b64.c_str(), true, 0); looksLikeLevel(d)) return d;
-    if (auto d = ZipUtils::decompressString(b64.c_str(), false, 0); looksLikeLevel(d)) return d;
+    if (auto d = ZipUtils::decompressString(b64, true, 0); looksLikeLevel(d)) return d;
+    if (auto d = ZipUtils::decompressString(b64, false, 0); looksLikeLevel(d)) return d;
 
     return std::nullopt;
 }
