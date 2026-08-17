@@ -1,4 +1,6 @@
 #include <set>
+#include <bitset>
+#include <algorithm>
 #include <Level.hpp>
 #include <random>
 #include <gdr/gdr.hpp>
@@ -12,6 +14,8 @@ class Replay2 : public gdr::Replay<Replay2, gdr::Input<"">> {
 struct Level2 : public Level {
 	bool press = false;
 	float highestY = 0;
+	std::vector<int> interestingFrames; // pre-computed frames near objects
+
 	using Level::Level;
 
 	Level2(std::string const& lvlString) : Level(lvlString) {
@@ -21,6 +25,34 @@ struct Level2 : public Level {
 				highestY = std::max(highestY, j->pos.y);
 			}
 		}
+		// Pre-compute interesting frames near objects
+		buildInterestingFrames();
+	}
+
+	void buildInterestingFrames() {
+		constexpr float windowRadius = 30.0f; // ±30 frames around each object
+		constexpr float fps = 240.0f;
+		float baseSpeed = player_speeds[std::clamp(gameStates[0].speed, 0, 4)];
+
+		std::set<int> frameSet; // avoid duplicates during building
+
+		for (auto& section : sections) {
+			for (auto& obj : section) {
+				// Estimate which frame the player will encounter this object
+				// frame ≈ (object_x / speed) * fps
+				float encounterFrame = (obj->pos.x / baseSpeed) * fps;
+				int startFrame = static_cast<int>(encounterFrame - windowRadius);
+				int endFrame = static_cast<int>(encounterFrame + windowRadius);
+
+				if (startFrame < 1) startFrame = 1;
+				for (int f = startFrame; f <= endFrame; ++f) {
+					frameSet.insert(f);
+				}
+			}
+		}
+
+		// Convert to sorted vector for fast random access
+		interestingFrames.assign(frameSet.begin(), frameSet.end());
 	}
 };
 
@@ -28,77 +60,106 @@ bool isLevelEnd(Level2& lvl) {
 	return lvl.latestState().pos.x >= lvl.length;
 }
 
-int tryInputs(Level2& lvl, std::set<uint16_t> inputs) {
+int tryInputs(Level2& lvl, std::bitset<65536> const& inputs) {
 	auto frame = lvl.currentFrame();
 	auto press_before = lvl.press;
 
-	while (!inputs.empty() && !lvl.gameStates.back().dead) {
-		if (inputs.contains(lvl.currentFrame())) {
-			lvl.press = !lvl.press;
-			inputs.erase(lvl.currentFrame());
-		}
+	// Save minimal state for fast restore instead of full rollback
+	int savedStateCount = static_cast<int>(lvl.gameStates.size());
+	auto savedPlayer = lvl.gameStates.back();
 
+	constexpr int maxSimFrames = 1500; // don't simulate forever per try
+	int f = frame;
+	int endFrame = frame + maxSimFrames;
+
+	while (!lvl.gameStates.back().dead && f < endFrame) {
+		if (inputs.test(f)) {
+			lvl.press = !lvl.press;
+		}
 		lvl.runFrame(lvl.press);
+		++f;
 	}
-	int final = lvl.currentFrame();
-	float lastX = lvl.latestState().pos.y;
+
+	int finalFrame = static_cast<int>(lvl.gameStates.size());
 	float lastY = lvl.latestState().pos.y;
 
-	lvl.rollback(frame);
+	// Fast restore: truncate vector and copy back one state
+	lvl.gameStates.resize(savedStateCount);
+	lvl.gameStates.back() = savedPlayer;
 	lvl.press = press_before;
 
-	if (lastX < lvl.length && (lastY > 1300 || lastY < 0))
+	if (lastY > 1300 || lastY < 0)
 		return 0;
-
-	return final;
+	return finalFrame;
 }
 
 std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& stop, std::function<void(double)> callback) {
 	Level2 lvl(lvlString);
-
 	std::random_device rd;
 	std::mt19937 rng(rd());
-	std::uniform_int_distribution<int> dist(0, 999);
+
+	// Distribution for biased sampling: pick from interesting frames
+	auto const& interesting = lvl.interestingFrames;
+	if (interesting.empty()) {
+		// Fallback: should never happen in a real level, but just in case
+		return {};
+	}
+	std::uniform_int_distribution<int> idxDist(0, static_cast<int>(interesting.size()) - 1);
+	// Fallback: small random offset for variety
+	std::uniform_int_distribution<int> jitterDist(-10, 10);
 
 	int trueBest = 0;
 	int fail = 1;
 	int numAway = 1000;
-
 	Level2 lvlBest = lvl;
+
+	// Progressive iteration count: start low, increase only when stuck
+	int iterations = 100;
+	constexpr int inputsPerTry = 15; // fewer inputs needed since they're targeted
 
 	while (lvl.gameStates.back().pos.x < lvl.length) {
 		auto frame = lvl.currentFrame();
-
-		std::set<uint16_t> bestInputs;
+		std::bitset<65536> bestInputs;
 		int bestFrame = frame;
 
-		constexpr int iterations = 300; //30
-		for (int i = 0; i < iterations; i++) {
+		// Find the range of interesting frames near our current position
+		// Binary search for the first interesting frame >= current frame
+		auto it = std::lower_bound(interesting.begin(), interesting.end(), frame);
+		int startIdx = static_cast<int>(it - interesting.begin());
 
-			std::set<uint16_t> inputs;
-			for (int i = 0; i < 30; i++) {
-				inputs.insert(frame + dist(rng));
+		for (int i = 0; i < iterations; ++i) {
+			std::bitset<65536> inputs;
+
+			for (int j = 0; j < inputsPerTry; ++j) {
+				// Pick a nearby interesting frame + small jitter
+				int idx = startIdx + (idxDist(rng) % std::max(1, static_cast<int>(interesting.size() - startIdx)));
+				if (idx >= static_cast<int>(interesting.size()))
+					idx = static_cast<int>(interesting.size()) - 1;
+				int targetFrame = interesting[idx] + jitterDist(rng);
+				if (targetFrame >= frame && targetFrame < 65535) {
+					inputs.set(static_cast<uint16_t>(targetFrame));
+				}
 			}
 
 			int nf = tryInputs(lvl, inputs);
-
 			if (nf > bestFrame) {
 				bestFrame = nf;
 				bestInputs = inputs;
+				// Early exit if we found great progress
 				if (bestFrame - frame > 500 && fail < 1000)
 					break;
 			}
 		}
 
 		if (bestFrame == frame) {
+			// No progress — roll back and increase iterations for next time
 			lvl.rollback(std::max(std::max(frame - fail, trueBest - numAway), 1));
-
 			fail += 5;
+			iterations = std::min(iterations + 30, 250); // ramp up when stuck
 
 			if (fail > numAway + 1000) {
 				numAway += 1000;
 				fail = 1;
-
 				if (numAway > 10000) {
 					numAway = 1000;
 					trueBest = 0;
@@ -108,8 +169,13 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 				fail += 50;
 			}
 		} else {
-			for (int i = frame; i < bestFrame - (bestFrame - frame) / 1.5; ++i) {
-				if (bestInputs.contains(i)) {
+			// Progress made — reset to lower iterations
+			iterations = 100;
+
+			// Advance 2/3 of the best distance found
+			int advanceTo = bestFrame - (bestFrame - frame) / 3; // same as: frame + (bestFrame-frame)*2/3
+			for (int i = frame; i < advanceTo; ++i) {
+				if (bestInputs.test(i)) {
 					lvl.press = !lvl.press;
 				}
 				lvl.runFrame(lvl.press);
@@ -124,10 +190,8 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 		if (lvl.currentFrame() > lvlBest.currentFrame()) {
 			lvlBest = lvl;
 		}
-
 		if (callback)
 			callback(std::min((lvl.latestState().pos.x / lvl.length) * 100, 100.0f));
-		//std::cout << "\rStatus: " << std::min((lvl.latestFrame().pos.x / lvl.length) * 100, 100.0f) << "%            " << std::flush;
 
 		if (stop)
 			break;
@@ -138,6 +202,5 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 	    if (i.frame > 1 && i.button != i.prevPlayer().button)
 	        output.inputs.push_back(gdr::Input(i.frame, 1, false, i.button));
 	}
-
 	return output.exportData().unwrapOr({});
 }
