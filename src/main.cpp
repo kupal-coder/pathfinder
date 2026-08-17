@@ -5,6 +5,7 @@
 #include <Geode/modify/LevelInfoLayer.hpp>
 #include <UIBuilder.hpp>
 #include "pathfinder.hpp"
+#include "checker.hpp"
 #include <future>
 
 using namespace geode::prelude;
@@ -15,10 +16,11 @@ class PathfinderNode : public CCLayerColor {
     std::atomic<double> m_progress = 0;
     std::future<std::vector<uint8_t>> m_result;
     std::string m_levelName;
+    GJGameLevel* m_level = nullptr;
 public:
-    static PathfinderNode* create(std::string const& levelName, std::string const& lvlString) {
+    static PathfinderNode* create(GJGameLevel* level, std::string const& levelName, std::string const& lvlString) {
         auto node = new PathfinderNode();
-        if (node && node->init(levelName, lvlString)) {
+        if (node && node->init(level, levelName, lvlString)) {
             node->autorelease();
             return node;
         }
@@ -30,11 +32,41 @@ public:
         m_stop = true;
         if (m_result.valid())
             m_result.get();
+        CC_SAFE_RELEASE(m_level);
     }
 
     void finalize(std::vector<uint8_t> macro) {
         getChildByIDRecursive("stop")->setVisible(false);
- 
+
+        auto verification = verifyInGame(m_level, macro);
+        if (!verification.completed) {
+            if (verification.died) {
+                log::error(
+                    "Path rejected: game collision at frame {}, object ID {} at ({:.3f}, {:.3f})",
+                    verification.frame, verification.objectID,
+                    verification.objectX, verification.objectY
+                );
+            } else {
+                log::error("Path rejected at frame {}: {}", verification.frame, verification.error);
+            }
+
+            const auto reason = verification.died
+                ? fmt::format(
+                    "The simulated path died in Geometry Dash.\n"
+                    "Frame: {}  Object: {}\nPosition: ({:.1f}, {:.1f})\n\n"
+                    "The unsafe replay was not exported.",
+                    verification.frame, verification.objectID,
+                    verification.objectX, verification.objectY
+                )
+                : fmt::format(
+                    "The path could not be verified in Geometry Dash.\n{}\n\n"
+                    "The unsafe replay was not exported.", verification.error
+                );
+            FLAlertLayer::create("Path rejected", reason, "OK")->show();
+            removeFromParentAndCleanup(true);
+            return;
+        }
+
         auto callback = [this, macro](this auto self) -> arc::Future<void> {
             auto saveDir = Mod::get()->getSaveDir();
             if (Loader::get()->isModLoaded("eclipse.eclipse-menu")) {
@@ -72,10 +104,12 @@ public:
         removeFromParentAndCleanup(true);
     }
 
-    bool init(std::string const& levelName, std::string const& lvlString) {
+    bool init(GJGameLevel* level, std::string const& levelName, std::string const& lvlString) {
         CCLayerColor::initWithColor({0, 0, 0, 100});
         setCascadeOpacityEnabled(true);
 
+        m_level = level;
+        CC_SAFE_RETAIN(m_level);
         m_levelName = levelName;
 
         m_result = std::async(std::launch::async, [lvlString, this]() {
@@ -178,7 +212,7 @@ class $modify(EditLevelLayer) {
 
         btn.intoMenuItem([this]() {
                 auto lvlString = ZipUtils::decompressString(m_level->m_levelString, true, 0);
-                Build<PathfinderNode>::create(m_level->m_levelName, lvlString).parent(this).zOrder(100);
+                Build<PathfinderNode>::create(m_level, m_level->m_levelName, lvlString).parent(this).zOrder(100);
         }).id("pathfinder-button")
           .intoNewParent(CCMenu::create())
           .parent(this)
@@ -206,7 +240,7 @@ class $modify(LevelInfoLayer) {
 
         btn.intoMenuItem([this]() {
                 auto lvlString = ZipUtils::decompressString(m_level->m_levelString, true, 0);
-                Build<PathfinderNode>::create(m_level->m_levelName, lvlString).parent(this).zOrder(100);
+                Build<PathfinderNode>::create(m_level, m_level->m_levelName, lvlString).parent(this).zOrder(100);
         }).id("pathfinder-button")
           .parent(getChildByID("other-menu"))
           .matchPos(getChildByIDRecursive("list-button"))

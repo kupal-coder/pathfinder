@@ -41,7 +41,7 @@ int tryInputs(Level2& lvl, std::set<uint16_t> inputs) {
 		lvl.runFrame(lvl.press);
 	}
 	int final = lvl.currentFrame();
-	float lastX = lvl.latestState().pos.y;
+	float lastX = lvl.latestState().pos.x;
 	float lastY = lvl.latestState().pos.y;
 
 	lvl.rollback(frame);
