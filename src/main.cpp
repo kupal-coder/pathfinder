@@ -48,7 +48,7 @@ public:
 
             const auto reason = verification.died
                 ? fmt::format(
-                    "The simulated path died in Geometry Dash.\n"
+                    "The runtime-searched path died during fresh verification.\n"
                     "Frame: {}  Object: {}\nPosition: ({:.1f}, {:.1f})\n\n"
                     "The unsafe replay was not exported.",
                     verification.frame, verification.objectID,
