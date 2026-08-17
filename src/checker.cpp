@@ -6,6 +6,7 @@
 #include <gdr/gdr.hpp>
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <deque>
 #include <limits>
 #include <memory>
@@ -281,6 +282,7 @@ RuntimeSearchTask pathfindInGame(
         }
     } layerLifetime {playLayer, previousLayer};
     playLayer->setVisible(false);
+    playLayer->m_isSilent = true;
 
     const auto configuredSeed = Mod::get()->getSettingValue<int64_t>("search-seed");
     const uint32_t runtimeSeed = configuredSeed == 0
@@ -294,8 +296,8 @@ RuntimeSearchTask pathfindInGame(
     constexpr float physicsStep = 1.f / 240.f;
     constexpr uint32_t minHorizon = 60;
     constexpr uint32_t maxHorizon = 240;
-    constexpr size_t beamWidth = 6;
-    constexpr int branchesPerNode = 12;
+    constexpr size_t maxBeamWidth = 6;
+    constexpr int maxBranchesPerNode = 12;
     constexpr int maxGenerations = 4800;
     uint32_t horizon = 120;
 
@@ -324,6 +326,53 @@ RuntimeSearchTask pathfindInGame(
         float score = 0;
         uint64_t stateHash = 0;
         uint64_t diversityHash = 0;
+    };
+    struct GameplayEvent {
+        GameObject* object = nullptr;
+        float distance = std::numeric_limits<float>::infinity();
+        std::string name = "open corridor";
+    };
+
+    auto eventName = [](GameObjectType type) -> std::string {
+        switch (type) {
+            case GameObjectType::Solid: return "solid";
+            case GameObjectType::Hazard:
+            case GameObjectType::AnimatedHazard: return "hazard";
+            case GameObjectType::Slope: return "slope";
+            case GameObjectType::DualPortal:
+            case GameObjectType::SoloPortal: return "dual portal";
+            case GameObjectType::TeleportPortal:
+            case GameObjectType::TeleportOrb: return "teleport";
+            case GameObjectType::DashRing:
+            case GameObjectType::GravityDashRing: return "dash orb";
+            case GameObjectType::Modifier: return "modifier";
+            case GameObjectType::CollisionObject: return "collision object";
+            default: return "orb or portal";
+        }
+    };
+    auto findNextEvent = [&](PlayerObject* player) {
+        GameplayEvent result;
+        const float playerX = player->getPositionX();
+        const bool movingLeft = player->m_isPlatformer &&
+            player->m_platformerXVelocity < 0;
+        for (auto* object : playLayer->m_activeObjects) {
+            if (!object || object->m_isDisabled ||
+                object->m_objectType == GameObjectType::Decoration ||
+                object->m_objectType == GameObjectType::Collectible ||
+                object->m_objectType == GameObjectType::UserCoin ||
+                object->m_objectType == GameObjectType::SecretCoin)
+                continue;
+            const float delta = object->getPositionX() - playerX;
+            if ((!movingLeft && delta < -15.f) || (movingLeft && delta > 15.f))
+                continue;
+            const float distance = std::abs(delta);
+            if (distance < result.distance) {
+                result.object = object;
+                result.distance = distance;
+                result.name = eventName(object->m_objectType);
+            }
+        }
+        return result;
     };
 
     auto captureCheckpoint = [&]() -> CheckpointPtr {
@@ -419,6 +468,10 @@ RuntimeSearchTask pathfindInGame(
     std::vector<Event> solvedPath;
     int restart = 0;
     constexpr int maxRestarts = 3;
+    uint64_t statesExpanded = 0;
+    uint64_t physicsFrames = 0;
+    auto searchStarted = std::chrono::steady_clock::now();
+    std::string latestEvent = "start";
 
     for (int generation = 0;
          generation < maxGenerations && !stop && solvedPath.empty();
@@ -429,11 +482,46 @@ RuntimeSearchTask pathfindInGame(
         size_t attemptedBranches = 0;
 
         for (auto const& base : frontier) {
-            auto ticks = pathfinder::fixedTickFrames(
-                base.frame + 1, base.frame + horizon, physicsStep
-            );
-            for (int branch = 0; branch < branchesPerNode && !stop; ++branch) {
+            Buttons eventP1;
+            Buttons eventP2;
+            restore(base, eventP1, eventP2);
+            auto nextEvent = findNextEvent(playLayer->m_player1);
+            latestEvent = nextEvent.name;
+            const uint32_t eventFrames = nextEvent.object
+                ? std::clamp<uint32_t>(
+                    static_cast<uint32_t>(nextEvent.distance * .8f), 1, maxHorizon)
+                : maxHorizon;
+            const uint32_t nodeHorizon = std::clamp<uint32_t>(
+                eventFrames + 45, minHorizon, horizon);
+            const int branchesForNode = std::min(maxBranchesPerNode,
+                nextEvent.distance < 300.f ? 12 : (frontier.size() == 1 ? 6 : 8));
+
+            for (int branch = 0; branch < branchesForNode && !stop; ++branch) {
                 ++attemptedBranches;
+                ++statesExpanded;
+                const bool baseHarmless = playLayer->m_player1->m_isRobot ||
+                    playLayer->m_player1->m_isBall ||
+                    (!playLayer->m_player1->m_isShip &&
+                     !playLayer->m_player1->m_isBird &&
+                     !playLayer->m_player1->m_isDart &&
+                     !playLayer->m_player1->m_isSpider &&
+                     !playLayer->m_player1->m_isSwing);
+                uint32_t rolloutHorizon = nodeHorizon;
+                if (branch == 1 && baseHarmless)
+                    rolloutHorizon = std::max<uint32_t>(rolloutHorizon, 960);
+                else if (branch == 0 && !nextEvent.object)
+                    rolloutHorizon = std::max<uint32_t>(rolloutHorizon, 480);
+
+                auto ticks = pathfinder::fixedTickFrames(
+                    base.frame + 1, base.frame + rolloutHorizon, physicsStep
+                );
+                const uint32_t targetFrame = base.frame +
+                    (eventFrames > 60 ? eventFrames - 60 : 1);
+                const auto endPosition = playLayer->getEndPosition();
+                const int8_t p1TowardEnd = endPosition.x <
+                    playLayer->m_player1->getPositionX() ? 1 : 2;
+                const int8_t p2TowardEnd = endPosition.x <
+                    playLayer->m_player2->getPositionX() ? 1 : 2;
                 struct Decision {
                     uint32_t frame;
                     bool p1Jump;
@@ -443,15 +531,39 @@ RuntimeSearchTask pathfindInGame(
                 };
                 std::vector<Decision> decisions;
                 decisions.reserve(ticks.size());
-                for (auto frame : ticks) {
+                for (size_t tickIndex = 0; tickIndex < ticks.size(); ++tickIndex) {
+                    const auto frame = ticks[tickIndex];
+                    auto templateJump = [&](bool player2) {
+                        if (branch == 0 || branch == 1) return false;
+                        if (branch == 2) return tickIndex == 0;
+                        if (branch == 3)
+                            return frame >= targetFrame &&
+                                (tickIndex == 0 || ticks[tickIndex - 1] < targetFrame);
+                        if (branch == 4) {
+                            const uint32_t releaseTarget = targetFrame + 20;
+                            return (frame >= targetFrame &&
+                                    (tickIndex == 0 || ticks[tickIndex - 1] < targetFrame)) ||
+                                   (frame >= releaseTarget &&
+                                    (tickIndex == 0 || ticks[tickIndex - 1] < releaseTarget));
+                        }
+                        const double probability =
+                            std::abs(static_cast<int64_t>(frame) - targetFrame) < 90
+                                ? .18 : .04;
+                        (void)player2;
+                        return chance(rng) < probability;
+                    };
                     decisions.push_back({
                         frame,
-                        branch != 0 && chance(rng) < .10,
-                        branch != 0 && chance(rng) < .10,
-                        branch != 0 && chance(rng) < .06
-                            ? static_cast<int8_t>(rng() % 3) : static_cast<int8_t>(-1),
-                        branch != 0 && chance(rng) < .06
-                            ? static_cast<int8_t>(rng() % 3) : static_cast<int8_t>(-1)
+                        templateJump(false),
+                        templateJump(true),
+                        (branch == 2 || branch == 3) && tickIndex == 0
+                            ? p1TowardEnd
+                            : (branch >= 5 && chance(rng) < .06
+                                ? static_cast<int8_t>(rng() % 3) : static_cast<int8_t>(-1)),
+                        (branch == 2 || branch == 3) && tickIndex == 0
+                            ? p2TowardEnd
+                            : (branch >= 5 && chance(rng) < .06
+                                ? static_cast<int8_t>(rng() % 3) : static_cast<int8_t>(-1))
                     });
                 }
 
@@ -497,7 +609,7 @@ RuntimeSearchTask pathfindInGame(
                     send(frame, 3, player2, direction == 2, buttons.right);
                 };
 
-                for (uint32_t offset = 1; offset <= horizon; ++offset) {
+                for (uint32_t offset = 1; offset <= rolloutHorizon; ++offset) {
                     const uint32_t frame = base.frame + offset;
                     if (releaseP1 == frame) {
                         send(frame, 1, false, false, p1.jump);
@@ -520,11 +632,14 @@ RuntimeSearchTask pathfindInGame(
                             playLayer->m_player2, p2);
                     }
                     playLayer->update(physicsStep);
+                    ++physicsFrames;
                     if (playLayer->m_hasCompletedLevel) {
                         completed = true;
                         break;
                     }
                     if (s_collision.died) break;
+                    if (offset % 240 == 0)
+                        co_yield true;
                 }
 
                 if (completed) {
@@ -542,7 +657,7 @@ RuntimeSearchTask pathfindInGame(
                     if (seenStates.insert(hash).second) {
                         Node candidate;
                         candidate.checkpoint = captureCheckpoint();
-                        candidate.frame = base.frame + horizon;
+                        candidate.frame = base.frame + rolloutHorizon;
                         candidate.p1 = p1;
                         candidate.p2 = p2;
                         candidate.path = std::make_shared<PathLink const>(PathLink {
@@ -593,18 +708,21 @@ RuntimeSearchTask pathfindInGame(
         std::sort(candidates.begin(), candidates.end(), [](Node const& a, Node const& b) {
             return a.score > b.score;
         });
+        const size_t targetBeamWidth = deadBranches * 2 > attemptedBranches
+            ? maxBeamWidth
+            : (latestEvent == "open corridor" ? 1u : 3u);
         std::unordered_set<uint64_t> diversityBuckets;
         std::vector<Node> diverse;
-        diverse.reserve(beamWidth);
+        diverse.reserve(targetBeamWidth);
         for (auto& candidate : candidates) {
             if (diversityBuckets.insert(candidate.diversityHash).second) {
                 diverse.push_back(std::move(candidate));
-                if (diverse.size() == beamWidth) break;
+                if (diverse.size() == targetBeamWidth) break;
             }
         }
         // If clustering was too aggressive, fill remaining slots by score.
         for (auto& candidate : candidates) {
-            if (diverse.size() == beamWidth) break;
+            if (diverse.size() == targetBeamWidth) break;
             if (candidate.checkpoint)
                 diverse.push_back(std::move(candidate));
         }
@@ -635,6 +753,13 @@ RuntimeSearchTask pathfindInGame(
             status.restart = restart;
             status.horizon = horizon;
             status.beamSize = frontier.size();
+            status.statesExpanded = statesExpanded;
+            status.physicsFrames = physicsFrames;
+            const double elapsed = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - searchStarted).count();
+            status.updatesPerSecond = elapsed > 0
+                ? static_cast<double>(physicsFrames) / elapsed : 0;
+            status.nextEvent = latestEvent;
             status.player1Mode = modeName(playLayer->m_player1);
             status.player2Mode = playLayer->m_gameState.m_isDualMode
                 ? modeName(playLayer->m_player2) : "-";

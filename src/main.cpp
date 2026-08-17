@@ -134,11 +134,15 @@ public:
         Build(this).initTouch().schedule([this](float) {
             Build(this).intoChildRecurseID<CCLabelBMFont>("percent")
                 .string(fmt::format(
-                    "{:.2f}% | G{} B{} H{} R{} | {}/{}",
-                    m_progress.load(), m_searchProgress.generation,
+                    "{:.2f}% | Next:{} | {}/{}\n"
+                    "G{} S{} F{} | {:.1f}k/s | B{} H{} R{}",
+                    m_progress.load(), m_searchProgress.nextEvent,
+                    m_searchProgress.player1Mode, m_searchProgress.player2Mode,
+                    m_searchProgress.generation, m_searchProgress.statesExpanded,
+                    m_searchProgress.physicsFrames,
+                    m_searchProgress.updatesPerSecond / 1000.,
                     m_searchProgress.beamSize, m_searchProgress.horizon,
-                    m_searchProgress.restart, m_searchProgress.player1Mode,
-                    m_searchProgress.player2Mode
+                    m_searchProgress.restart
                 ).c_str());
             if (m_finished)
                 return;
@@ -157,7 +161,8 @@ public:
                 // Search and verification both stay on the cocos thread, but
                 // only consume a small frame budget so controls remain live.
                 const auto deadline = std::chrono::steady_clock::now() +
-                    std::chrono::milliseconds(4);
+                    std::chrono::milliseconds(
+                        Mod::get()->getSettingValue<int64_t>("search-frame-budget"));
                 if (m_search) {
                     bool done = false;
                     do {
@@ -231,6 +236,7 @@ public:
                 .scale(0.8),
             Build<CCLabelBMFont>::create("0.00", "chatFont.fnt")
                 .id("percent")
+                .scale(.55f)
                 .move(0, 10),
             Build<ButtonSprite>::create("Stop", "bigFont.fnt", "GJ_button_04.png")
                 .scale(0.8)
@@ -327,6 +333,10 @@ class AcceptanceRunnerNode : public CCLayerColor {
                << ",\"restart\":" << m_fixtureSearchProgress.restart
                << ",\"beamSize\":" << m_fixtureSearchProgress.beamSize
                << ",\"horizon\":" << m_fixtureSearchProgress.horizon
+               << ",\"statesExpanded\":" << m_fixtureSearchProgress.statesExpanded
+               << ",\"physicsFrames\":" << m_fixtureSearchProgress.physicsFrames
+               << ",\"updatesPerSecond\":" << m_fixtureSearchProgress.updatesPerSecond
+               << ",\"nextEvent\":\"" << jsonEscape(m_fixtureSearchProgress.nextEvent) << "\""
                << ",\"frame\":" << result.frame
                << ",\"objectID\":" << result.objectID
                << ",\"objectX\":" << result.objectX
@@ -439,7 +449,8 @@ class AcceptanceRunnerNode : public CCLayerColor {
 
         try {
             const auto deadline = std::chrono::steady_clock::now() +
-                std::chrono::milliseconds(4);
+                std::chrono::milliseconds(
+                    Mod::get()->getSettingValue<int64_t>("search-frame-budget"));
             if (m_search) {
                 bool done = false;
                 do {

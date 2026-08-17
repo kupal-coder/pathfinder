@@ -99,6 +99,10 @@ struct SearchProgress {
     int restart = 0;
     uint32_t horizon = 0;
     size_t beamSize = 0;
+    uint64_t statesExpanded = 0;
+    uint64_t physicsFrames = 0;
+    double updatesPerSecond = 0;
+    std::string nextEvent;
     std::string player1Mode;
     std::string player2Mode;
 };

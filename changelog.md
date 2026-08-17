@@ -1,7 +1,10 @@
 # beta 25
 
 - Search now runs against Geometry Dash's exact runtime PlayLayer and checkpoint state
-- Cooperative six-state diversity beam search with trigger-state deduplication, adaptive horizons, deterministic restarts, and a 4 ms UI frame budget
+- Event-driven diversity beam search with deterministic no-input/hold/70-CPS/timed-jump templates
+- Fast-path rollouts extend stable cube/ball/robot spam up to 960 frames
+- Dynamic branch count, beam width, obstacle horizon, deterministic restarts, and configurable 2-20 ms UI budget
+- Runtime throughput metrics show expanded states, physics frames, updates/sec, and the next gameplay event
 - Cooperative double verification with first-divergent-frame diagnostics and level checksums
 - Platformer jump/left/right inputs, reverse-safe safety scoring, action pruning, shared path storage, and replay minimization
 - Hidden PlayLayer lifecycle restoration on completion, cancellation, and exceptions

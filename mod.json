@@ -9,7 +9,7 @@
 	"geode": "5.9.0",
 	"name": "Pathfinder",
 	"developer": "camila314",
-	"version": "v1.0.0-beta.251",
+	"version": "v1.0.0-beta.252",
 	"settings": {
 		"search-seed": {
 			"name": "Deterministic Search Seed",
@@ -18,6 +18,14 @@
 			"default": 0,
 			"min": 0,
 			"max": 2147483647
+		},
+		"search-frame-budget": {
+			"name": "Search Frame Budget",
+			"description": "Milliseconds of runtime search work per rendered frame. Higher is faster but may reduce UI framerate.",
+			"type": "int",
+			"default": 8,
+			"min": 2,
+			"max": 20
 		},
 		"test-timeout": {
 			"name": "Acceptance Test Timeout",
