@@ -75,8 +75,9 @@ void setRuntimeSeed(PlayLayer* layer, uint32_t seed) {
 uint64_t levelChecksum(GJGameLevel* level) {
     auto data = ZipUtils::decompressString(level->m_levelString, true, 0);
     uint64_t hash = 1469598103934665603ull;
-    for (unsigned char byte : data) {
-        hash ^= byte;
+    auto const* bytes = reinterpret_cast<unsigned char const*>(data.c_str());
+    for (size_t index = 0; index < data.size(); ++index) {
+        hash ^= bytes[index];
         hash *= 1099511628211ull;
     }
     return hash;
@@ -205,16 +206,16 @@ RuntimeVerificationTask verifyInGameCooperative(
             mix(flags);
         };
         mixPlayer(playLayer->m_player1);
-        if (playLayer->m_isDualMode)
+        if (playLayer->m_gameState.m_isDualMode)
             mixPlayer(playLayer->m_player2);
-        mix(playLayer->m_isDualMode);
+        mix(playLayer->m_gameState.m_isDualMode);
         mix(playLayer->m_randomSeed);
         mix(playLayer->m_spawnTuples.size());
         mix(playLayer->m_sequenceTriggers.size());
         mix(playLayer->m_collectedItems ? playLayer->m_collectedItems->count() : 0);
         mix(playLayer->m_objectsToMove ? playLayer->m_objectsToMove->count() : 0);
-        mix(playLayer->m_spawnChannelRelated0.size());
-        mix(playLayer->m_spawnChannelRelated1.size());
+        mix(playLayer->m_gameState.m_spawnChannelRelated0.size());
+        mix(playLayer->m_gameState.m_spawnChannelRelated1.size());
         mix(playLayer->m_movedCount);
         mix(playLayer->m_areaMovedCount);
         result.frameHashes.push_back(result.traceHash);
@@ -366,17 +367,17 @@ RuntimeSearchTask pathfindInGame(
                 (value->m_isSwing << 6) | (value->m_isUpsideDown << 7));
         };
         player(playLayer->m_player1);
-        if (playLayer->m_isDualMode)
+        if (playLayer->m_gameState.m_isDualMode)
             player(playLayer->m_player2);
         mix(playLayer->m_currentStep);
-        mix(playLayer->m_commandIndex);
+        mix(playLayer->m_gameState.m_commandIndex);
         mix(playLayer->m_randomSeed);
         mix(playLayer->m_spawnTuples.size());
         mix(playLayer->m_sequenceTriggers.size());
         mix(playLayer->m_collectedItems ? playLayer->m_collectedItems->count() : 0);
         mix(playLayer->m_objectsToMove ? playLayer->m_objectsToMove->count() : 0);
-        mix(playLayer->m_spawnChannelRelated0.size());
-        mix(playLayer->m_spawnChannelRelated1.size());
+        mix(playLayer->m_gameState.m_spawnChannelRelated0.size());
+        mix(playLayer->m_gameState.m_spawnChannelRelated1.size());
         mix(playLayer->m_movedCount);
         mix(playLayer->m_areaMovedCount);
         for (auto* object : playLayer->m_activeObjects) {
@@ -406,8 +407,8 @@ RuntimeSearchTask pathfindInGame(
                 (value->m_isSwing << 6) | (value->m_isUpsideDown << 7));
         };
         player(playLayer->m_player1);
-        if (playLayer->m_isDualMode) player(playLayer->m_player2);
-        mix(playLayer->m_currentChannel);
+        if (playLayer->m_gameState.m_isDualMode) player(playLayer->m_player2);
+        mix(playLayer->m_gameState.m_currentChannel);
         return hash;
     };
 
@@ -473,7 +474,7 @@ RuntimeSearchTask pathfindInGame(
                 auto jumpDecision = [&](uint32_t frame, bool player2, bool selected,
                                         PlayerObject* player, Buttons& buttons,
                                         uint32_t& releaseFrame) {
-                    if (player2 && !playLayer->m_isDualMode) return;
+                    if (player2 && !playLayer->m_gameState.m_isDualMode) return;
                     const bool action = player->m_isSpider || player->m_isSwing;
                     const bool harmless = player->m_isRobot || player->m_isBall ||
                         (!player->m_isShip && !player->m_isBird && !player->m_isDart &&
@@ -490,7 +491,7 @@ RuntimeSearchTask pathfindInGame(
                 auto directionDecision = [&](uint32_t frame, bool player2,
                                              int8_t direction, PlayerObject* player,
                                              Buttons& buttons) {
-                    if ((player2 && !playLayer->m_isDualMode) ||
+                    if ((player2 && !playLayer->m_gameState.m_isDualMode) ||
                         !player->m_isPlatformer || direction < 0) return;
                     send(frame, 2, player2, direction == 1, buttons.left);
                     send(frame, 3, player2, direction == 2, buttons.right);
@@ -553,7 +554,7 @@ RuntimeSearchTask pathfindInGame(
                             p1pos.x - end.x, p1pos.y - end.y);
                         float velocityPenalty = static_cast<float>(
                             std::abs(playLayer->m_player1->m_yVelocity) * .01);
-                        if (playLayer->m_isDualMode)
+                        if (playLayer->m_gameState.m_isDualMode)
                             velocityPenalty += static_cast<float>(
                                 std::abs(playLayer->m_player2->m_yVelocity) * .01);
                         candidate.score = playLayer->getCurrentPercent() * 1000.f -
@@ -635,7 +636,7 @@ RuntimeSearchTask pathfindInGame(
             status.horizon = horizon;
             status.beamSize = frontier.size();
             status.player1Mode = modeName(playLayer->m_player1);
-            status.player2Mode = playLayer->m_isDualMode
+            status.player2Mode = playLayer->m_gameState.m_isDualMode
                 ? modeName(playLayer->m_player2) : "-";
             progress(status);
         }
