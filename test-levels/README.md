@@ -4,6 +4,14 @@ These files are raw, uncompressed Geometry Dash level strings. Paste/import one
 into a local editor level before running the named check. A task passes only if
 the exported replay completes when played back without safe mode.
 
+## `object-*.lvl` (Task 1)
+
+There is one focused runtime fixture for each requested feature: dual players,
+upside-down slopes, partial rotation, robot, spider, swing, a spawn/move trigger
+graph, dash orb, linked teleport portals, a 2.2 force block, and the D/J/S/H
+modifier blocks. These deliberately rely on runtime `GameObject` behavior; no
+production object-ID hitbox or behavior table is involved.
+
 ## `runtime-phasing.lvl` (Task 2)
 
 The trigger graph moves group 7 into the player's route. The old standalone

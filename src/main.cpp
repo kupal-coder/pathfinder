@@ -4,9 +4,7 @@
 #include <Geode/modify/EditLevelLayer.hpp>
 #include <Geode/modify/LevelInfoLayer.hpp>
 #include <UIBuilder.hpp>
-#include "pathfinder.hpp"
 #include "checker.hpp"
-#include <future>
 
 using namespace geode::prelude;
 using namespace geode::utils::file;
@@ -14,7 +12,7 @@ using namespace geode::utils::file;
 class PathfinderNode : public CCLayerColor {
     std::atomic_bool m_stop = false;
     std::atomic<double> m_progress = 0;
-    std::future<std::vector<uint8_t>> m_result;
+    bool m_started = false;
     std::string m_levelName;
     GJGameLevel* m_level = nullptr;
 public:
@@ -30,8 +28,6 @@ public:
 
     ~PathfinderNode() {
         m_stop = true;
-        if (m_result.valid())
-            m_result.get();
         CC_SAFE_RELEASE(m_level);
     }
 
@@ -112,36 +108,34 @@ public:
         CC_SAFE_RETAIN(m_level);
         m_levelName = levelName;
 
-        m_result = std::async(std::launch::async, [lvlString, this]() {
-            try {
-            return pathfind(lvlString, m_stop, [this](double progress) {
-                if (m_progress < progress)
-                    m_progress = progress;
-            });
-            } catch (std::exception& e) {
-                log::error("{}", e.what());
-                return std::vector<uint8_t>();
-            }
-        });
-
+        (void)lvlString; // Runtime PlayLayer is now the authoritative level source.
         setKeypadEnabled(true);
 
         Build(this).initTouch().schedule([this](float) {
-                Build(this).intoChildRecurseID<CCLabelBMFont>("percent")
-                    .string(fmt::format("{:.2f}%", m_progress).c_str());
+            Build(this).intoChildRecurseID<CCLabelBMFont>("percent")
+                .string(fmt::format("{:.2f}%", m_progress).c_str());
 
-                if (m_result.valid() && m_result.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-                    finalize(m_result.get());
+            if (!m_started) {
+                m_started = true;
+                try {
+                    auto macro = pathfindInGame(m_level, m_stop, [this](double value) {
+                        if (m_progress < value)
+                            m_progress = value;
+                    });
+                    finalize(std::move(macro));
+                } catch (std::exception const& error) {
+                    log::error("Runtime pathfinder failed: {}", error.what());
+                    finalize({});
                 }
+            }
         });
 
         auto handle = [this](CCMenuItemSpriteExtra* it) {
             m_stop = true;
 
-            if (it->getID() == "stop")
-                finalize(m_result.get());
-            else
-                removeFromParentAndCleanup(true);
+            // A stop request rejects the incomplete candidate rather than
+            // exporting an unverified replay.
+            removeFromParentAndCleanup(true);
         };
 
         auto menu = Build<CCMenu>::create().parent(this).id("menu").children(
