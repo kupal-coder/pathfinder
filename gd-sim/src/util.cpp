@@ -1,6 +1,9 @@
 #include <util.hpp>
 #include <cmath>
 #include <complex>
+#include <array>
+#include <limits>
+#include <algorithm>
 
 float slerp(float fromAngle, float toAngle, float t) {
     std::complex<float> fromVec = std::polar(1.0f, fromAngle * 0.5f);
@@ -42,55 +45,87 @@ Vec2D Vec2D::rotate(float angle, Vec2D const& pivot) const {
     return tmp;
 }
 
-// Very complicated (but very fast) way to check intersection
-bool intersectOneWay(Entity const& a, Entity const& b) {
-    float big = std::max(a.size.x, a.size.y) + std::max(b.size.x, b.size.y);
-    if (std::abs(a.pos.x - b.pos.x) > big || std::abs(a.pos.y - b.pos.y) > big) {
-        return false;
-    }
+namespace {
 
-    Entity tmp = b;
+struct Projection {
+    float min;
+    float max;
+};
 
-    tmp.rotation -= a.rotation;
-    tmp.pos = tmp.pos.rotate(-a.rotation, a.pos);
+std::array<Vec2D, 4> corners(Entity const& entity) {
+    const float hx = entity.size.x * .5f;
+    const float hy = entity.size.y * .5f;
+    std::array<Vec2D, 4> result {{
+        {-hx, -hy}, {hx, -hy}, {hx, hy}, {-hx, hy}
+    }};
+    for (auto& point : result)
+        point = (point + entity.pos).rotate(entity.rotation, entity.pos);
+    return result;
+}
 
-    Vec2D corners[4] = {
-        Vec2D(tmp.getLeft(), tmp.getBottom()).rotate(tmp.rotation, tmp.pos),
-        Vec2D(tmp.getRight(), tmp.getBottom()).rotate(tmp.rotation, tmp.pos),
-        Vec2D(tmp.getRight(), tmp.getTop()).rotate(tmp.rotation, tmp.pos),
-        Vec2D(tmp.getLeft(), tmp.getTop()).rotate(tmp.rotation, tmp.pos)
+Vec2D normalized(Vec2D vector) {
+    const float length = std::hypot(vector.x, vector.y);
+    return length == 0 ? Vec2D{} : vector / length;
+}
+
+Projection project(std::array<Vec2D, 4> const& points, Vec2D axis) {
+    Projection result {
+        points[0].x * axis.x + points[0].y * axis.y,
+        points[0].x * axis.x + points[0].y * axis.y
     };
+    for (size_t i = 1; i < points.size(); ++i) {
+        const float value = points[i].x * axis.x + points[i].y * axis.y;
+        result.min = std::min(result.min, value);
+        result.max = std::max(result.max, value);
+    }
+    return result;
+}
 
-    float lastDiffX = 0;
-    bool overlapX = false;
+} // namespace
 
-    float lastDiffY = 0;
-    bool overlapY = false;
+std::optional<CollisionManifold> Entity::collisionManifold(Entity const& other) const {
+    // A cheap conservative rejection keeps SAT out of the hot path for distant
+    // objects.  Half diagonals are valid for every orientation.
+    const float radiusA = .5f * std::hypot(size.x, size.y);
+    const float radiusB = .5f * std::hypot(other.size.x, other.size.y);
+    if (std::abs(pos.x - other.pos.x) > radiusA + radiusB ||
+        std::abs(pos.y - other.pos.y) > radiusA + radiusB)
+        return {};
 
-    for (auto vert : corners) {
-        if (!overlapX) {
-            float diffX = vert.x - a.pos.x;
-            if ((vert.x >= a.getLeft() && vert.x <= a.getRight()) || (lastDiffX != 0 && std::signbit(lastDiffX) != std::signbit(diffX))) {
-                overlapX = true;
-            }
-            lastDiffX = diffX;
-        }
-        if (!overlapY) {
-            float diffY = vert.y - a.pos.y;
-            if ((vert.y >= a.getBottom() && vert.y <= a.getTop()) || (lastDiffY != 0 && std::signbit(lastDiffY) != std::signbit(diffY))) {
-                overlapY = true;
-            }
-            lastDiffY = diffY;
+    const auto a = corners(*this);
+    const auto b = corners(other);
+    const std::array<Vec2D, 4> axes {{
+        normalized({a[1].x - a[0].x, a[1].y - a[0].y}),
+        normalized({a[3].x - a[0].x, a[3].y - a[0].y}),
+        normalized({b[1].x - b[0].x, b[1].y - b[0].y}),
+        normalized({b[3].x - b[0].x, b[3].y - b[0].y})
+    }};
+
+    float leastDepth = std::numeric_limits<float>::max();
+    Vec2D leastAxis;
+    for (auto axis : axes) {
+        const auto pa = project(a, axis);
+        const auto pb = project(b, axis);
+        const float overlap = std::min(pa.max, pb.max) - std::max(pa.min, pb.min);
+        // Edge contact is a collision in GD. It matters for landing exactly on
+        // a rotated surface, so only a negative overlap separates the boxes.
+        if (overlap < 0)
+            return {};
+        if (overlap < leastDepth) {
+            leastDepth = overlap;
+            leastAxis = axis;
         }
     }
 
-    return overlapX && overlapY;
+    const Vec2D centerDelta = pos - other.pos;
+    if (centerDelta.x * leastAxis.x + centerDelta.y * leastAxis.y < 0)
+        leastAxis *= -1;
+    return CollisionManifold {leastAxis * leastDepth, leastAxis, leastDepth};
 }
 
-bool Entity::intersects(Entity const& b) const {
-    return intersectOneWay(*this, b) && intersectOneWay(b, *this);
+bool Entity::intersects(Entity const& other) const {
+    return collisionManifold(other).has_value();
 }
-
 
 /*using Vec2 = Vec2D;
 // Return normalized perpendicular axis from two points

@@ -19,3 +19,10 @@ add_executable(gd-sim-test ${SOURCES} test/test.cpp)
 
 set_target_properties(gd-sim-test PROPERTIES INTERPROCEDURAL_OPTIMIZATION 0)
 target_include_directories(gd-sim-test PRIVATE include)
+
+include(CTest)
+if (BUILD_TESTING)
+    add_executable(gd-sim-geometry-test src/util.cpp test/geometry.cpp)
+    target_include_directories(gd-sim-geometry-test PRIVATE include)
+    add_test(NAME gd-sim-geometry COMMAND gd-sim-geometry-test)
+endif()

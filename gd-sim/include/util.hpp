@@ -9,6 +9,7 @@
 #include <variant>
 #include <memory>
 #include <unordered_map>
+#include <optional>
 
 class hash_tuple {
     template<class T>
@@ -172,11 +173,20 @@ struct Vec2D {
     Vec2D rotate(float angle, Vec2D const& pivot = {0, 0}) const;
 };
 
+struct CollisionManifold {
+    // Smallest translation that moves the first entity out of the second.
+    Vec2D translation;
+    // Unit vector pointing in the direction of translation.
+    Vec2D normal;
+    float depth;
+};
+
 struct Entity {
     Vec2D pos;
     Vec2D size;
     float rotation;
     bool intersects(Entity const& other) const;
+    std::optional<CollisionManifold> collisionManifold(Entity const& other) const;
 
     inline float getLeft() const { return pos.x - size.x / 2; }
     inline float getRight() const { return pos.x + size.x / 2; }

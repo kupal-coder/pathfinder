@@ -10,10 +10,15 @@ Block::Block(Vec2D s, std::unordered_map<int, std::string>&& fields) : Object(s,
 	// Blocks have a prio of 1, so they are processed later than most other objects.
 	prio = 1;
 
-	// No rotation allowed
-	if ((int)fabs(rotation) % 180 != 0)
-		size = {size.y, size.x};
-	rotation = 0;
+	// Cardinal rotations can use the cheaper axis-aligned collision path. Keep
+	// every other angle: cube/UFO/ball collisions need the object's real OBB.
+	const float cardinal = std::remainder(rotation, 360.f);
+	const float quarterTurns = std::round(cardinal / 90.f);
+	if (std::abs(cardinal - quarterTurns * 90.f) < .001f) {
+		if (std::abs(static_cast<int>(quarterTurns)) % 2 != 0)
+			size = {size.y, size.x};
+		rotation = 0;
+	}
 
 	// Edge case for this specific block.
 	if (fields[1] == "468" && size.y == 5) {
@@ -87,6 +92,37 @@ void trySnap(Block const& b, Player& p) {
 }
 
 void Block::collide(Player& p) const {
+	if (rotation != 0) {
+		auto manifold = p.unrotatedHitbox().collisionManifold(*this);
+		if (!manifold)
+			return;
+
+		// The manifold normal is expressed from the block toward the player.
+		// Resolve contacts against the actual rotated face rather than replacing
+		// the object with its axis-aligned bounding box.
+		const float gravityNormal = p.grav(manifold->normal.y);
+		if (gravityNormal > .45f && (p.velocity <= 0 || p.gravityPortal)) {
+			p.pos += manifold->translation;
+			p.grounded = true;
+			p.slopeData.slope = {};
+			return;
+		}
+
+		const bool canTouchCeiling = p.vehicle.type == VehicleType::Ship ||
+			p.vehicle.type == VehicleType::Ufo || p.vehicle.type == VehicleType::Ball;
+		if (gravityNormal < -.45f && canTouchCeiling && p.velocity > 0) {
+			p.pos += manifold->translation;
+			p.setVelocity(0, true);
+			return;
+		}
+
+		// A side/corner hit uses the inner hitbox, matching the ordinary block
+		// path and avoiding deaths from harmless outer-hitbox grazing.
+		if (p.innerHitbox().intersects(*this))
+			p.dead = true;
+		return;
+	}
+
 	// The maximum amount the player can dip below block while still being snapped up
 	int clip = (p.vehicle.type == VehicleType::Ufo || p.vehicle.type == VehicleType::Ship) ? 7 : 10;
 
