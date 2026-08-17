@@ -2,8 +2,10 @@
 #include <Level.hpp>
 #include <Player.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <climits>
 #include <vector>
 
 /**
@@ -20,6 +22,27 @@ struct InputTape {
 	std::vector<uint32_t> toggles;
 
 	void toggle(uint32_t frame) { toggles.push_back(frame); }
+
+	/**
+	 * Whether adding a toggle at `frame` would breach the click rate cap.
+	 *
+	 * Checked against the tape rather than only within an expansion chunk,
+	 * because two legal-looking chunks can still place toggles either side of
+	 * a chunk boundary closer than the cap allows.
+	 */
+	bool wouldExceedRate(uint32_t frame, int minGap) const {
+		if (toggles.empty())
+			return false;
+		return frame < toggles.back() + static_cast<uint32_t>(minGap);
+	}
+
+	/// Tightest spacing present, or UINT32_MAX when there are fewer than two.
+	uint32_t tightestGap() const {
+		uint32_t tightest = UINT32_MAX;
+		for (size_t i = 1; i < toggles.size(); ++i)
+			tightest = std::min(tightest, toggles[i] - toggles[i - 1]);
+		return tightest;
+	}
 
 	/// Button state at `frame`, derived by counting toggles at or before it.
 	bool pressedAt(uint32_t frame) const {
