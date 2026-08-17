@@ -51,6 +51,11 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_executable(gd-sim-librarytest test/librarytest.cpp)
     set_target_properties(gd-sim-librarytest PROPERTIES INTERPROCEDURAL_OPTIMIZATION 0)
 
+    # Runtime object classification (behaviour from GameObjectType).
+    add_executable(gd-sim-objectmodeltest test/objectmodeltest.cpp)
+    target_include_directories(gd-sim-objectmodeltest PRIVATE ../src)
+    set_target_properties(gd-sim-objectmodeltest PROPERTIES INTERPROCEDURAL_OPTIMIZATION 0)
+
     # Oriented bounding box geometry.
     add_executable(gd-sim-obbtest ${SOURCES} test/obbtest.cpp)
     target_include_directories(gd-sim-obbtest PRIVATE include test)
@@ -72,6 +77,7 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_test(NAME physics-golden COMMAND gd-sim-golden verify)
     add_test(NAME search-correctness COMMAND gd-sim-searchtest)
     add_test(NAME library-naming COMMAND gd-sim-librarytest)
+    add_test(NAME object-model COMMAND gd-sim-objectmodeltest)
     add_test(NAME obb-geometry COMMAND gd-sim-obbtest)
     add_test(NAME click-rate COMMAND gd-sim-cpstest)
     add_test(NAME features COMMAND gd-sim-featuretest)
