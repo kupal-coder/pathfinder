@@ -2,14 +2,14 @@
 
 Auto-generate macros for levels using simulation! This mod uses a physics simulator under the hood to solve levels in seconds! It does not come with a bot, you will need to install one for this.
 
-# Runtime object support
+# Search and verification
 
-Pathfinder searches through Geometry Dash's own `PlayLayer`, so dual players,
-all vehicle modes, rotated objects and slopes, trigger-spawned/moved/toggled
-objects, dash and teleport mechanics, 2.2 objects, and modifier blocks use the
-same runtime behavior and hitboxes as normal gameplay. Generated paths are
-replayed through a fresh runtime layer and are only exportable after completing
-with zero deaths.
+Normal pathfinding uses camila314's original rolling random-search algorithm and
+standalone simulator. Every generated candidate is then replayed twice through
+fresh Geometry Dash `PlayLayer` instances. A replay can only be exported when
+both runtime attempts complete with zero deaths and matching traces. Levels
+using mechanics unsupported by the original simulator may be rejected instead
+of producing an unsafe macro.
 
 # How To Use
 

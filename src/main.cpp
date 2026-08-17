@@ -5,7 +5,9 @@
 #include <Geode/modify/LevelInfoLayer.hpp>
 #include <UIBuilder.hpp>
 #include "checker.hpp"
+#include "pathfinder.hpp"
 #include <chrono>
+#include <future>
 #include <optional>
 #include <sstream>
 
@@ -15,10 +17,9 @@ using namespace geode::utils::file;
 class PathfinderNode : public CCLayerColor {
     std::atomic_bool m_stop = false;
     std::atomic<double> m_progress = 0;
-    SearchProgress m_searchProgress;
-    bool m_started = false;
     bool m_finished = false;
-    std::optional<RuntimeSearchTask> m_search;
+    bool m_searchComplete = false;
+    std::future<std::vector<uint8_t>> m_result;
     std::optional<RuntimeVerificationTask> m_verification;
     std::optional<VerificationResult> m_firstVerification;
     std::vector<uint8_t> m_pendingMacro;
@@ -37,7 +38,8 @@ public:
 
     ~PathfinderNode() {
         m_stop = true;
-        m_search.reset();
+        if (m_result.valid())
+            m_result.wait();
         m_verification.reset();
         CC_SAFE_RELEASE(m_level);
     }
@@ -128,49 +130,34 @@ public:
         CC_SAFE_RETAIN(m_level);
         m_levelName = levelName;
 
-        (void)lvlString; // Runtime PlayLayer is now the authoritative level source.
+        // Preserve the original camila314 rolling random-search algorithm.
+        // It runs off-thread through gd-sim; every result still has to pass two
+        // fresh runtime PlayLayer verifications before export.
+        m_result = std::async(std::launch::async, [this, lvlString] {
+            return pathfind(lvlString, m_stop, [this](double value) {
+                if (m_progress < value)
+                    m_progress = value;
+            });
+        });
         setKeypadEnabled(true);
 
         Build(this).initTouch().schedule([this](float) {
             Build(this).intoChildRecurseID<CCLabelBMFont>("percent")
-                .string(fmt::format(
-                    "{:.2f}% | Next:{} | {}/{}\n"
-                    "G{} S{} F{} | {:.1f}k/s | B{} H{} R{}",
-                    m_progress.load(), m_searchProgress.nextEvent,
-                    m_searchProgress.player1Mode, m_searchProgress.player2Mode,
-                    m_searchProgress.generation, m_searchProgress.statesExpanded,
-                    m_searchProgress.physicsFrames,
-                    m_searchProgress.updatesPerSecond / 1000.,
-                    m_searchProgress.beamSize, m_searchProgress.horizon,
-                    m_searchProgress.restart
-                ).c_str());
+                .string(fmt::format("{:.2f}% | Original rolling search",
+                    m_progress.load()).c_str());
             if (m_finished)
                 return;
 
             try {
-                if (!m_started) {
-                    m_started = true;
-                    m_search.emplace(pathfindInGame(m_level, m_stop,
-                        [this](SearchProgress const& status) {
-                            m_searchProgress = status;
-                            if (m_progress < status.percent)
-                                m_progress = status.percent;
-                        }));
-                }
-
-                // Search and verification both stay on the cocos thread, but
-                // only consume a small frame budget so controls remain live.
                 const auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::milliseconds(
                         Mod::get()->getSettingValue<int64_t>("search-frame-budget"));
-                if (m_search) {
-                    bool done = false;
-                    do {
-                        done = m_search->resume();
-                    } while (!done && std::chrono::steady_clock::now() < deadline);
-                    if (done) {
-                        m_pendingMacro = m_search->takeResult();
-                        m_search.reset();
+                if (!m_searchComplete) {
+                    if (m_result.valid() &&
+                        m_result.wait_for(std::chrono::seconds(0)) ==
+                            std::future_status::ready) {
+                        m_pendingMacro = m_result.get();
+                        m_searchComplete = true;
                         m_verification.emplace(verifyInGameCooperative(
                             m_level, m_pendingMacro, m_stop));
                     }
@@ -211,8 +198,7 @@ public:
                     finalize(std::move(m_pendingMacro), std::move(result));
                 }
             } catch (std::exception const& error) {
-                log::error("Runtime pathfinder failed: {}", error.what());
-                m_search.reset();
+                log::error("Original pathfinder failed: {}", error.what());
                 m_verification.reset();
                 VerificationResult failure;
                 failure.error = error.what();

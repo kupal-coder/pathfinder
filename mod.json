@@ -9,7 +9,7 @@
 	"geode": "5.9.0",
 	"name": "Pathfinder",
 	"developer": "camila314",
-	"version": "v1.0.0-beta.254",
+	"version": "v1.0.0-beta.255",
 	"settings": {
 		"search-seed": {
 			"name": "Deterministic Search Seed",

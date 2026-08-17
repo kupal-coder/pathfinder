@@ -1,5 +1,7 @@
 # beta 25
 
+- Restored camila314's original rolling random-search algorithm for normal pathfinding
+- Kept level checksums, 70-CPS export validation, and double runtime verification as export gates
 - Search now runs against Geometry Dash's exact runtime PlayLayer and checkpoint state
 - Fixed hidden PlayLayers staying frozen at 0.00% by explicitly starting gameplay
 - Event-driven diversity beam search with no-input, hold, adaptive-CPS, and timed-jump templates
