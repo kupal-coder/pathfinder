@@ -51,8 +51,28 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_executable(gd-sim-librarytest test/librarytest.cpp)
     set_target_properties(gd-sim-librarytest PROPERTIES INTERPROCEDURAL_OPTIMIZATION 0)
 
+    # Oriented bounding box geometry.
+    add_executable(gd-sim-obbtest ${SOURCES} test/obbtest.cpp)
+    target_include_directories(gd-sim-obbtest PRIVATE include test)
+    set_target_properties(gd-sim-obbtest PROPERTIES INTERPROCEDURAL_OPTIMIZATION 0)
+
+    # Click rate cap and fixed-timestep accumulator.
+    add_executable(gd-sim-cpstest ${SOURCES} test/cpstest.cpp)
+    target_include_directories(gd-sim-cpstest PRIVATE include test ../src)
+    target_link_libraries(gd-sim-cpstest PRIVATE Threads::Threads)
+    set_target_properties(gd-sim-cpstest PROPERTIES INTERPROCEDURAL_OPTIMIZATION 0)
+
+    # Per-feature levels: detection, phasing regression, replay verification.
+    add_executable(gd-sim-featuretest ${SOURCES} test/featuretest.cpp)
+    target_include_directories(gd-sim-featuretest PRIVATE include test ../src)
+    target_link_libraries(gd-sim-featuretest PRIVATE Threads::Threads)
+    set_target_properties(gd-sim-featuretest PROPERTIES INTERPROCEDURAL_OPTIMIZATION 0)
+
     enable_testing()
     add_test(NAME physics-golden COMMAND gd-sim-golden verify)
     add_test(NAME search-correctness COMMAND gd-sim-searchtest)
     add_test(NAME library-naming COMMAND gd-sim-librarytest)
+    add_test(NAME obb-geometry COMMAND gd-sim-obbtest)
+    add_test(NAME click-rate COMMAND gd-sim-cpstest)
+    add_test(NAME features COMMAND gd-sim-featuretest)
 endif()
