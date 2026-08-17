@@ -25,4 +25,8 @@ if (BUILD_TESTING)
     add_executable(gd-sim-geometry-test src/util.cpp test/geometry.cpp)
     target_include_directories(gd-sim-geometry-test PRIVATE include)
     add_test(NAME gd-sim-geometry COMMAND gd-sim-geometry-test)
+
+    add_executable(gd-sim-input-scheduler-test test/input_scheduler.cpp)
+    target_include_directories(gd-sim-input-scheduler-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+    add_test(NAME gd-sim-input-scheduler COMMAND gd-sim-input-scheduler-test)
 endif()

@@ -3,6 +3,7 @@
 #include <random>
 #include <gdr/gdr.hpp>
 #include "pathfinder.hpp"
+#include "input_scheduler.hpp"
 
 class Replay2 : public gdr::Replay<Replay2, gdr::Input<"">> {
  public:
@@ -28,7 +29,7 @@ bool isLevelEnd(Level2& lvl) {
 	return lvl.latestState().pos.x >= lvl.length;
 }
 
-int tryInputs(Level2& lvl, std::set<uint16_t> inputs) {
+int tryInputs(Level2& lvl, std::set<uint32_t> inputs) {
 	auto frame = lvl.currentFrame();
 	auto press_before = lvl.press;
 
@@ -58,7 +59,6 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 
 	std::random_device rd;
 	std::mt19937 rng(rd());
-	std::uniform_int_distribution<int> dist(0, 999);
 
 	int trueBest = 0;
 	int fail = 1;
@@ -69,15 +69,22 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 	while (lvl.gameStates.back().pos.x < lvl.length) {
 		auto frame = lvl.currentFrame();
 
-		std::set<uint16_t> bestInputs;
+		std::set<uint32_t> bestInputs;
 		int bestFrame = frame;
+
+		// Candidate actions are sampled only on the 70 Hz clock. The clock phase
+		// is based on absolute simulation time, so rollback does not shift clicks.
+		auto actionFrames = pathfinder::fixedTickFrames(
+			static_cast<uint32_t>(frame), static_cast<uint32_t>(frame + 999), 1. / 240.
+		);
+		std::uniform_int_distribution<size_t> actionDist(0, actionFrames.size() - 1);
 
 		constexpr int iterations = 300; //30
 		for (int i = 0; i < iterations; i++) {
 
-			std::set<uint16_t> inputs;
+			std::set<uint32_t> inputs;
 			for (int i = 0; i < 30; i++) {
-				inputs.insert(frame + dist(rng));
+				inputs.insert(actionFrames[actionDist(rng)]);
 			}
 
 			int nf = tryInputs(lvl, inputs);
