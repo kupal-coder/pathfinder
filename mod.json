@@ -30,6 +30,9 @@
 	"resources": {
 		"sprites": [
 			"pathfinder.png"
+		],
+		"files": [
+			"test-levels/*.lvl"
 		]
 	},
 	"description": "Beat levels automatically!",

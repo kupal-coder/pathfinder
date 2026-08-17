@@ -1,8 +1,10 @@
 # Manual acceptance levels
 
-These files are raw, uncompressed Geometry Dash level strings. Paste/import one
-into a local editor level before running the named check. A task passes only if
-the exported replay completes when played back without safe mode.
+These files are raw, uncompressed Geometry Dash level strings. They are bundled
+with the mod and can be run from the **Tests** button beside Pathfinder in the
+editor. The runner searches every fixture, performs two fresh runtime replays,
+and writes `acceptance-report.txt` in the mod save directory. A task passes only
+if both replays complete without safe mode and produce identical trace hashes.
 
 ## `object-*.lvl` (Task 1)
 
