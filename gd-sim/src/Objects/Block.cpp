@@ -99,7 +99,7 @@ void Block::collide(Player& p) const {
 		Going from slope to block means you have to check the bottom of the player
 		adjusted for the angle of the slope
 	*/
-	double bottom = p.gravBottom(p);
+	float bottom = p.gravBottom(p);
 	if (p.slopeData.slope) {
 		if (p.slopeData.slope->angle() > 0) {
 			bottom = bottom + sin(p.slopeData.slope->angle()) * p.size.y / 2;

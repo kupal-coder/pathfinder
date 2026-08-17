@@ -2,6 +2,7 @@
 #include <bitset>
 #include <algorithm>
 #include <Level.hpp>
+#include <Physics.hpp>
 #include <random>
 #include <gdr/gdr.hpp>
 #include "pathfinder.hpp"
@@ -32,7 +33,7 @@ struct Level2 : public Level {
 	void buildInterestingFrames() {
 		constexpr float windowRadius = 30.0f; // ±30 frames around each object
 		constexpr float fps = 240.0f;
-		float baseSpeed = player_speeds[std::clamp(gameStates[0].speed, 0, 4)];
+		float baseSpeed = PHYS_SPEEDS[std::clamp(gameStates[0].speed, 0, 4)];
 
 		std::set<int> frameSet; // avoid duplicates during building
 

@@ -1,33 +1,18 @@
 #pragma once
-
 #undef small
 #include <util.hpp>
 #include <Vehicle.hpp>
 #include <Slope.hpp>
+#include <Physics.hpp>
 #include <vector>
 #include <functional>
 #include <optional>
 
+// Backward compatibility aliases (to be phased out)
+inline constexpr const float (&player_speeds)[5] = PHYS_SPEEDS;
+inline constexpr const float (&player_speedmults)[5] = PHYS_SPEED_MULTS;
 
-/// Player X velocity per speed
-inline double player_speeds[5] = {
-	251.16007972276924,
-	311.580093712804,
-	387.42014039710523,
-	468.0001388338566,
-	576.00020058307177
-};
-
-/// Used in player rotation. Similar to m_playerSpeed member variable
-inline float player_speedmults[5] = {
-	0.7,
-	0.9,
-	1.1,
-	1.3,
-	1.6	
-};
-
-double roundVel(double velocity, bool upsideDown);
+float roundVel(float velocity, bool upsideDown);
 
 struct Object;
 class Level;
@@ -35,14 +20,14 @@ struct Slope;
 
 /**
  * The main player. This contains the entire player state and is the only thing that changes each frame.
+ * All physics fields use float to match Geometry Dash's internal 32-bit precision.
  */
 struct Player : public Entity {
 	Vehicle vehicle;
 	Level* level;
-
-	double timeElapsed;
-	double acceleration;
-	double velocity;
+	float timeElapsed;
+	float acceleration;
+	float velocity;
 
 	/// See util.hpp for what cow_set is
 	cow_set<int> usedEffects;
@@ -56,10 +41,8 @@ struct Player : public Entity {
 	/// Slopes have special collision rules. See Slope.cpp for more information.
 	struct {
 		std::optional<Slope> slope;
-
 		/// Time on slope
-		double elapsed;
-
+		float elapsed;
 		/// When colliding with a downhill slope with a positive velocity.
 		bool snapDown;
 	} slopeData;
@@ -80,44 +63,46 @@ struct Player : public Entity {
 	int speed;
 	int frame;
 
-	bool dead;
-	bool grounded;
+	// --- Boolean flags (packed for cache efficiency) ---
+	bool dead : 1;
+	bool grounded : 1;
 
 	/**
 	 * Under normal circumstances, acceleration is applied to the velocity
 	 * at the end of a frame. When this field is set, acceleration will not
 	 * be applied at the end of the frame. Mainly set via `setVelocity`
 	 */
-	bool velocityOverride;
+	bool velocityOverride : 1;
 
 	/**
 	 * `button` vs `input`: Button always refers to whether a click was applied; input can be disabled
 	 * for niche circumstances where no other normal operations are allowed despite a click.
 	 */
-	bool button, input;
+	bool button : 1;
+	bool input : 1;
 
 	/// If a click is being buffered. Used for things like orb clicks.
-	bool buffer;
+	bool buffer : 1;
+
 	/**
 	 * In the ball vehicle, holding a click while transitioning into another vehicle will cause a
 	 * buffered input, despite things like orbs not buffering in the same way.
 	 */
-	bool vehicleBuffer;
+	bool vehicleBuffer : 1;
 
-	bool upsideDown;
-	bool small;
+	bool upsideDown : 1;
+	bool small : 1;
 
 	/// Entering a gravity portal can cause the next frame to have certain edge cases
-	bool gravityPortal;
+	bool gravityPortal : 1;
 
 	/// Whether velocity at the end of the frame is to be rounded (typically used by ball)
-	bool roundVelocity;
+	bool roundVelocity : 1;
 
 	Player();
 
 	void preCollision(bool input);
 	void postCollision();
-
 	
 	Entity unrotatedHitbox() const;
 
@@ -130,10 +115,11 @@ struct Player : public Entity {
 	/// Values relative to player gravity.
 	template <typename T>
 	T grav(T value) const { return upsideDown ? -value : value; }
+
 	inline float gravBottom(Entity const& e) const { return upsideDown ? -e.getTop() : e.getBottom(); }
 	inline float gravTop(Entity const& e) const { return upsideDown ? -e.getBottom() : e.getTop(); }
 	inline float gravFloor() const { return upsideDown ? -ceiling : floor; }
 	inline float gravCeiling() const { return upsideDown ? -floor : ceiling; }
 
-	void setVelocity(double v, bool override=false);
+	void setVelocity(float v, bool override = false);
 };

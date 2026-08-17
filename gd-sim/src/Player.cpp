@@ -12,13 +12,11 @@ Entity Player::unrotatedHitbox() const {
 	return {pos, size, 0};
 }
 
-void Player::setVelocity(double v, bool override) {
+void Player::setVelocity(float v, bool override) {
 	velocityOverride = override;
-
 	// Being small commonly means velocity is 4/5 the original velocity.
-	velocity = v * (small ? 0.8 : 1);
-
-	if (v != 0)
+	velocity = v * (small ? 0.8f : 1.0f);
+	if (v != 0.0f)
 		grounded = false;
 }
 
@@ -32,20 +30,24 @@ Player const* Player::nextPlayer() const {
 
 /**
  * In Geometry Dash, velocity is stored as 1/54 of distance per second.
- * It is also rounded to the nearest hundredth after (almost) every operation.
- * This function accounts for that rounding
+ * It is also rounded to the nearest thousandth after (almost) every operation.
+ * This function accounts for that rounding to match GD's exact behavior.
  */
-double roundVel(double velocity, bool upsideDown) {
-	double nVel = velocity / 54.0 * (upsideDown * 2 - 1);
-	double floored = (int)nVel;
-	if (nVel != floored) {
-		nVel = (double)std::round((nVel - floored) * 1000.0) / 1000.0 + floored;
+float roundVel(float velocity, bool upsideDown) {
+	float sign = upsideDown ? -1.0f : 1.0f;
+	float nVel = velocity / PHYS_VEL_UNIT * sign;
+	float floored = std::floor(nVel);
+	float frac = nVel - floored;
+	if (frac != 0.0f) {
+		// Round to 3 decimal places to match GD's internal rounding
+		frac = std::round(frac * 1000.0f) / 1000.0f;
+		nVel = floored + frac;
 	}
-	return nVel * 54.0 * (upsideDown * 2 - 1);
+	return nVel * PHYS_VEL_UNIT * sign;
 }
 
 void Player::preCollision(bool pressed) {
-	pos.x += player_speeds[(int)speed] * dt;
+	pos.x += PHYS_SPEEDS[(int)speed] * dt;
 	pos.y += grav(velocity) * dt;
 
 	frame++;
@@ -76,23 +78,23 @@ void Player::preCollision(bool pressed) {
 void Player::postCollision() {
 	// Size portal only affects hitbox size at the end of frame
 	if (small != prevPlayer().small) {
-		size = small ? (size * 0.6) : (size / 0.6);
+		size = small ? (size * 0.6f) : (size / 0.6f);
 	}
 
-	if (gravBottom(*this) <= gravFloor() && !velocityOverride && velocity <= 0 ) {
-		pos.y = grav(gravFloor()) + grav(size.y / 2);
+	if (gravBottom(*this) <= gravFloor() && !velocityOverride && velocity <= 0.0f) {
+		pos.y = grav(gravFloor()) + grav(size.y / 2.0f);
 		grounded = true;
 		snapData.playerFrame = 0;
 	}
 
 	// Fell through ceiling, or hit floor
-	if (pos.y > 1476.3 || (upsideDown && getBottom() < floor)) {
+	if (pos.y > PHYS_DEATH_Y_HIGH || (upsideDown && getBottom() < floor)) {
 		dead = true;
 		return;
 	}
 
 	// Coyote frames 
-	if (prevPlayer().gravBottom(*this) > prevPlayer().gravFloor() && upsideDown == prevPlayer().upsideDown && !grounded && velocity <= 0) {
+	if (prevPlayer().gravBottom(*this) > prevPlayer().gravFloor() && upsideDown == prevPlayer().upsideDown && !grounded && velocity <= 0.0f) {
 		if (prevPlayer().grounded && !prevPlayer().input)
 			coyoteFrames = 0;
 		coyoteFrames++;
@@ -104,18 +106,17 @@ void Player::postCollision() {
 	vehicle.update(*this);
 
 	if (!velocityOverride) {
-		double newVel = velocity + acceleration * dt;
+		float newVel = velocity + acceleration * dt;
 
 		// Player will fall off blocks a frame faster than expected.
 		if (!grounded && prevPlayer().grounded && ((!input && (prevPlayer().button || !button)) || buffer) && prevPlayer().gravBottom(*this) > prevPlayer().gravFloor() && size == prevPlayer().size) {
 			pos.y += roundVel(prevPlayer().grav(prevPlayer().acceleration) * dt, prevPlayer().upsideDown) * dt;
-
 			if (gravityPortal && vehicle.type != VehicleType::Ship)
 				newVel = -newVel;
-
-			if (velocity == 0)
+			if (velocity == 0.0f)
 				newVel += roundVel(prevPlayer().acceleration * dt, upsideDown);
 		}
+
 		velocity = newVel;
 	}
 
@@ -138,10 +139,3 @@ Player::Player() :
 	velocityOverride(false), button(false), input(false),
 	vehicleBuffer(false), upsideDown(false), small(false),
 	speed(1), slopeData({{}, 0, false}), roundVelocity(true) {}
-
-
-
-
-
-
-

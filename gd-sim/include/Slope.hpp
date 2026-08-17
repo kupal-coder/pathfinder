@@ -17,20 +17,19 @@ struct Slope : public Block {
     /// Orientation of the slope relative to the player's gravity.
     int gravOrient(Player const& p) const;
 
-    double angle() const;
+    float angle() const;
     bool isFacingUp() const;
 
     /**
      * The Y position that a player should be snapped to if on the slope.
      * Also used for collision detection
      */
-    virtual double expectedY(Player const& p) const;
+    virtual float expectedY(Player const& p) const;
 };
-
 
 struct SlopeHazard : public Slope {
     using Slope::Slope;
     void collide(Player&) const override;
     bool touching(Player const&) const override;
-    double expectedY(Player const& p) const override;
+    float expectedY(Player const& p) const override;
 };
