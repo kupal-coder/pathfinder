@@ -12,6 +12,7 @@ add_library(${PROJECT_NAME} SHARED
     src/pathfinder.cpp
     src/checker.cpp
     src/debug.cpp
+    src/loader.cpp
     # Add any extra C++ source files here
 )
 

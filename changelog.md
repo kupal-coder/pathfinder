@@ -1,3 +1,13 @@
+# beta 25
+
+- Load Macro: new folder button in EditLevelLayer and LevelInfoLayer that opens the mod's save folder (or Eclipse Menu's replays folder) and loads files
+- Macros (.gdr2/.gdr) are parsed and shown in a popup with their info (bot, level, inputs, frames, duration)
+- Verify button simulates a loaded macro against the current level and reports if it completes it or where it dies
+- Save As lets you copy a loaded macro to any bot's replay folder
+- Level files (raw, gzip/zlib compressed, or base64 level strings) are detected automatically - a "Level Loaded" popup lets you Pathfind the level directly
+- File picker shows all files in the folder (no extension filter), and clearly reports when a picked file is neither a macro nor a level
+- Fixed compile errors in the loader (missing UIBuilder include, invalid Result::unwrapErr calls)
+
 # beta 24
 
 - Red Orb & Red Pad

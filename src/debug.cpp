@@ -10,6 +10,7 @@ using namespace geode::utils::file;
 #include <Geode/modify/EditorPauseLayer.hpp>
 #include <Geode/modify/EditLevelLayer.hpp>
 #include <gdr/gdr.hpp>
+#include "loader.hpp"
 #include "subprocess.hpp"
 
 #ifndef DEBUG_MODE
@@ -52,7 +53,7 @@ void runTestSim(std::string const& level, std::filesystem::path const& path) {
 
     if (replay.isErr())
         return;
-    auto inputs = replay.unwrap().inputs;
+    auto inputs = std::move(replay).unwrap().inputs;
 
     std::string encoded = "0";
     bool currentHold = false;
@@ -196,7 +197,7 @@ class $modify(EditLevelLayer) {
         EditLevelLayer::init(p0);
 
         auto btn = Build<BasedButtonSprite>::create(
-            CCSprite::create("pathfinder.png"_spr),
+            CCSprite::create("GJ_folderBtn_001.png"),
             BaseType::Circle,
             4,
             2
@@ -204,16 +205,12 @@ class $modify(EditLevelLayer) {
 
         btn->setTopRelativeScale(1.4);
 
-        btn.intoMenuItem(async::wrapSpawn([this](this auto self) -> arc::Future<void> {
-            auto lvlString = ZipUtils::decompressString(m_level->m_levelString, true, 0);
-
-            if (auto val = co_await pick(PickMode::OpenFile, {}); val.isOk() && val.unwrap().has_value()) {
-                runTestSim(lvlString, *val.unwrap());
-            }
-        })).id("pathfinder-debug-button")
+        btn.intoMenuItem([this]() {
+            openMacroLoader(m_level, this);
+        }).id("pathfinder-load-button")
           .intoNewParent(CCMenu::create())
           .parent(this)
-          .id("pathfinder-debug-menu")
+          .id("pathfinder-load-menu")
           .matchPos(getChildByIDRecursive("delete-button"))
           .move(-45, -50);
 
