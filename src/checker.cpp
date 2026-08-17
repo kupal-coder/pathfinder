@@ -506,6 +506,10 @@ RuntimeSearchTask pathfindInGame(
                      !playLayer->m_player1->m_isDart &&
                      !playLayer->m_player1->m_isSpider &&
                      !playLayer->m_player1->m_isSwing);
+                // Branch one samples a deterministic rate between 1 and 70
+                // CPS. Seventy is a strict ceiling, never a forced pattern.
+                const int adaptiveCps = branch == 1
+                    ? 1 + static_cast<int>(rng() % 70) : 0;
                 uint32_t rolloutHorizon = nodeHorizon;
                 if (branch == 1 && baseHarmless)
                     rolloutHorizon = std::max<uint32_t>(rolloutHorizon, 960);
@@ -534,7 +538,11 @@ RuntimeSearchTask pathfindInGame(
                 for (size_t tickIndex = 0; tickIndex < ticks.size(); ++tickIndex) {
                     const auto frame = ticks[tickIndex];
                     auto templateJump = [&](bool player2) {
-                        if (branch == 0 || branch == 1) return false;
+                        if (branch == 0) return false;
+                        if (branch == 1)
+                            // Divide by 71 so even a 70-CPS target remains an
+                            // adaptive pattern rather than forced every-tick spam.
+                            return chance(rng) < static_cast<double>(adaptiveCps) / 71.;
                         if (branch == 2) return tickIndex == 0;
                         if (branch == 3)
                             return frame >= targetFrame &&
@@ -591,7 +599,9 @@ RuntimeSearchTask pathfindInGame(
                     const bool harmless = player->m_isRobot || player->m_isBall ||
                         (!player->m_isShip && !player->m_isBird && !player->m_isDart &&
                          !player->m_isSpider && !player->m_isSwing);
-                    const bool pulse = action ? selected : (branch == 1 && harmless);
+                    const bool pulseCandidate = branch == 1 || branch >= 5;
+                    const bool pulse = selected &&
+                        (action || (pulseCandidate && harmless));
                     if (pulse) {
                         send(frame, 1, player2, false, buttons.jump);
                         send(frame, 1, player2, true, buttons.jump);

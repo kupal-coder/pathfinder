@@ -1,8 +1,8 @@
 # beta 25
 
 - Search now runs against Geometry Dash's exact runtime PlayLayer and checkpoint state
-- Event-driven diversity beam search with deterministic no-input/hold/70-CPS/timed-jump templates
-- Fast-path rollouts extend stable cube/ball/robot spam up to 960 frames
+- Event-driven diversity beam search with no-input, hold, adaptive-CPS, and timed-jump templates
+- Fast-path rollouts extend promising 0-70 CPS cube/ball/robot patterns up to 960 frames
 - Dynamic branch count, beam width, obstacle horizon, deterministic restarts, and configurable 2-20 ms UI budget
 - Runtime throughput metrics show expanded states, physics frames, updates/sec, and the next gameplay event
 - Cooperative double verification with first-divergent-frame diagnostics and level checksums
@@ -14,8 +14,8 @@
 - Mismatches log P1/P2, collision object transform, player position, and velocity and are never exported
 - Oriented collision geometry for rotated solids in simulator diagnostics
 - Framerate-independent 70 CPS action clock with an export-time rolling cap validator
-- Mode-aware scheduling adapts immediately after portals; spider and swing use 70 only as a cap
-- Constant 70 CPS pulses are limited to cube, ball, and robot
+- Adaptive candidates sample the full 0-70 CPS range; 70 is never forced
+- Mode-aware scheduling adapts immediately after portals, with sparse discrete spider/swing actions
 - Feature-focused manual acceptance levels and scheduler/geometry regression tests
 
 # beta 24
