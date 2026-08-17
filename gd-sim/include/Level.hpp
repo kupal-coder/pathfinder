@@ -2,6 +2,7 @@
 #include <Object.hpp>
 #include <Player.hpp>
 #include <vector>
+#include <RuntimeSnapshot.hpp>
 
 
 /**
@@ -30,6 +31,7 @@ class Level {
  	bool debug = false;
 
  	Level(std::string const& lvlString);
+	Level(RuntimeLevelSnapshot const& snapshot);
 
  	/// The main update function. Every frame is associated with a press/release state.
  	Player& runFrame(bool pressed, float dt = 1/240.);

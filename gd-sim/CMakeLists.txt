@@ -30,6 +30,10 @@ if (BUILD_TESTING)
     target_include_directories(gd-sim-input-scheduler-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
     add_test(NAME gd-sim-input-scheduler COMMAND gd-sim-input-scheduler-test)
 
+    add_executable(gd-sim-runtime-snapshot-test ${SOURCES} test/runtime_snapshot.cpp)
+    target_include_directories(gd-sim-runtime-snapshot-test PRIVATE include)
+    add_test(NAME gd-sim-runtime-snapshot COMMAND gd-sim-runtime-snapshot-test)
+
     find_package(Python3 COMPONENTS Interpreter)
     if (Python3_Interpreter_FOUND)
         add_test(

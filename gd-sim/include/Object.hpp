@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <cstring>
 #include <optional>
+#include <RuntimeSnapshot.hpp>
 
 struct ObjectContainer;
 struct Player;
@@ -28,6 +29,10 @@ struct Object : public Entity {
 
     /// Create an object from a given level string mapping.
     static std::optional<ObjectContainer> create(std::unordered_map<int, std::string>&& ob);
+
+    /// Create from Geometry Dash's runtime classification and transformed
+    /// collision rectangle. No editor-object-ID hitbox lookup is performed.
+    static std::optional<ObjectContainer> create(RuntimeObjectSnapshot const& object);
 };
 
 /**

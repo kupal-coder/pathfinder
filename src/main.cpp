@@ -130,14 +130,16 @@ public:
         CC_SAFE_RETAIN(m_level);
         m_levelName = levelName;
 
-        // Use camila314's original gd-sim rolling random-search implementation.
-        // Runtime PlayLayer verification remains mandatory before export.
-        m_result = std::async(std::launch::async, [this, lvlString] {
-            return pathfind(lvlString, m_stop, [this](double value) {
-                if (m_progress < value)
-                    m_progress = value;
+        // Snapshot Geometry Dash's actual transformed collision world on the
+        // cocos thread, then feed it to the original gd-sim rolling search.
+        auto runtimeSnapshot = captureRuntimeSnapshot(level);
+        m_result = std::async(std::launch::async,
+            [this, lvlString, runtimeSnapshot = std::move(runtimeSnapshot)] {
+                return pathfind(lvlString, m_stop, [this](double value) {
+                    if (m_progress < value)
+                        m_progress = value;
+                }, runtimeSnapshot);
             });
-        });
         setKeypadEnabled(true);
 
         Build(this).initTouch().schedule([this](float) {

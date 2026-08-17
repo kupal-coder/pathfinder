@@ -185,3 +185,44 @@ void Object::collide(Player&) const {
 	// Unreachable
 	abort();
 }
+
+std::optional<ObjectContainer> Object::create(RuntimeObjectSnapshot const& snapshot) {
+	auto fields = snapshot.properties;
+	fields[1] = std::to_string(snapshot.editorObjectID);
+	fields[2] = std::to_string(snapshot.position.x);
+	fields[3] = std::to_string(snapshot.position.y);
+	fields[4] = snapshot.flipX ? "1" : "0";
+	fields[5] = snapshot.flipY ? "1" : "0";
+	fields[6] = std::to_string(-snapshot.rotation);
+	// Runtime hitboxSize is already fully transformed.
+	fields[32] = "1";
+	fields[128] = "1";
+	fields[129] = "1";
+
+	std::optional<ObjectContainer> result;
+	switch (snapshot.kind) {
+		case RuntimeObjectKind::Solid:
+			result = ObjectContainer(Block(snapshot.hitboxSize, std::move(fields)));
+			break;
+		case RuntimeObjectKind::Breakable:
+			result = ObjectContainer(BreakableBlock(snapshot.hitboxSize, std::move(fields)));
+			break;
+		case RuntimeObjectKind::Hazard:
+			result = ObjectContainer(Hazard(snapshot.hitboxSize, std::move(fields)));
+			break;
+		case RuntimeObjectKind::Slope:
+			result = ObjectContainer(Slope(snapshot.hitboxSize, std::move(fields)));
+			break;
+		default:
+			return {};
+	}
+
+	if (result) {
+		(*result)->id = snapshot.uniqueID;
+		(*result)->pos = snapshot.position;
+		(*result)->size = snapshot.hitboxSize;
+		if (snapshot.kind != RuntimeObjectKind::Slope)
+			(*result)->rotation = snapshot.rotation;
+	}
+	return result;
+}

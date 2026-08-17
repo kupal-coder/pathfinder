@@ -194,3 +194,25 @@ Player const& Level::getState(int frame) const {
 Player& Level::latestState() {
 	return gameStates.back();
 }
+
+Level::Level(RuntimeLevelSnapshot const& snapshot) : Level(snapshot.rawLevelString) {
+	// Keep level settings/player initialization from the raw string, but replace
+	// the collision world with Geometry Dash's actual transformed object list.
+	sections.clear();
+	objectCount = 0;
+	length = snapshot.levelLength;
+	for (auto const& runtimeObject : snapshot.objects) {
+		if (!runtimeObject.enabled)
+			continue;
+		auto object = Object::create(runtimeObject);
+		if (!object)
+			continue;
+		(*object)->id = runtimeObject.uniqueID;
+		size_t section = std::max(.0f, (*object)->pos.x / sectionSize);
+		if (section >= sections.size()) sections.resize(section + 1);
+		sections[section].push_back(*object);
+		++objectCount;
+		length = std::max(length, (*object)->pos.x + 100.f);
+	}
+	if (sections.empty()) sections.resize(1);
+}

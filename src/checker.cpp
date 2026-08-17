@@ -1,5 +1,6 @@
 #include "checker.hpp"
 #include "input_scheduler.hpp"
+#include <RuntimeSnapshot.hpp>
 
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PlayLayer.hpp>
@@ -11,6 +12,7 @@
 #include <limits>
 #include <memory>
 #include <random>
+#include <sstream>
 #include <string_view>
 #include <unordered_set>
 
@@ -85,6 +87,180 @@ uint64_t levelChecksum(GJGameLevel* level) {
 }
 
 } // namespace
+
+
+std::shared_ptr<RuntimeLevelSnapshot> captureRuntimeSnapshot(GJGameLevel* level) {
+    if (!level) return {};
+    auto snapshot = std::make_shared<RuntimeLevelSnapshot>();
+    snapshot->rawLevelString = ZipUtils::decompressString(
+        level->m_levelString, true, 0).c_str();
+
+    auto previousLayer = PlayLayer::get();
+    CC_SAFE_RETAIN(previousLayer);
+    auto layer = PlayLayer::create(level, false, false);
+    if (!layer) {
+        CC_SAFE_RELEASE(previousLayer);
+        return {};
+    }
+    layer->retain();
+    struct Guard {
+        PlayLayer* layer;
+        PlayLayer* previous;
+        ~Guard() {
+            layer->release();
+            GameManager::sharedState()->m_playLayer = previous;
+            CC_SAFE_RELEASE(previous);
+        }
+    } guard {layer, previousLayer};
+    layer->setVisible(false);
+    layer->m_isSilent = true;
+    layer->resetLevel();
+    layer->startGame();
+
+    auto vehicle = [](PlayerObject* player) {
+        if (player->m_isSwing) return RuntimeVehicle::Swing;
+        if (player->m_isSpider) return RuntimeVehicle::Spider;
+        if (player->m_isRobot) return RuntimeVehicle::Robot;
+        if (player->m_isDart) return RuntimeVehicle::Wave;
+        if (player->m_isBird) return RuntimeVehicle::Ufo;
+        if (player->m_isBall) return RuntimeVehicle::Ball;
+        if (player->m_isShip) return RuntimeVehicle::Ship;
+        return RuntimeVehicle::Cube;
+    };
+    auto player = [&](PlayerObject* source) {
+        RuntimePlayerSnapshot result;
+        result.vehicle = vehicle(source);
+        result.position = {source->getPositionX(), source->getPositionY()};
+        auto rect = source->getObjectRect();
+        result.hitboxSize = {rect.size.width, rect.size.height};
+        result.yVelocity = source->m_yVelocity;
+        result.rotation = source->getRotation();
+        result.upsideDown = source->m_isUpsideDown;
+        result.mini = source->m_isMini;
+        result.platformer = source->m_isPlatformer;
+        return result;
+    };
+    snapshot->player1 = player(layer->m_player1);
+    snapshot->player2 = player(layer->m_player2);
+    snapshot->dual = layer->m_gameState.m_isDualMode;
+    snapshot->randomSeed = layer->m_randomSeed;
+    snapshot->levelLength = layer->getEndPosition().x;
+
+    auto kind = [](GameObjectType type) {
+        switch (type) {
+            case GameObjectType::Solid: return RuntimeObjectKind::Solid;
+            case GameObjectType::Hazard:
+            case GameObjectType::AnimatedHazard: return RuntimeObjectKind::Hazard;
+            case GameObjectType::Slope: return RuntimeObjectKind::Slope;
+            case GameObjectType::Breakable: return RuntimeObjectKind::Breakable;
+            case GameObjectType::YellowJumpPad:
+            case GameObjectType::PinkJumpPad:
+            case GameObjectType::RedJumpPad:
+            case GameObjectType::GravityPad:
+            case GameObjectType::SpiderPad: return RuntimeObjectKind::JumpPad;
+            case GameObjectType::YellowJumpRing:
+            case GameObjectType::PinkJumpRing:
+            case GameObjectType::RedJumpRing:
+            case GameObjectType::GravityRing:
+            case GameObjectType::GreenRing:
+            case GameObjectType::DropRing:
+            case GameObjectType::CustomRing:
+            case GameObjectType::SpiderOrb:
+            case GameObjectType::TeleportOrb: return RuntimeObjectKind::JumpOrb;
+            case GameObjectType::InverseGravityPortal:
+            case GameObjectType::NormalGravityPortal:
+            case GameObjectType::GravityTogglePortal: return RuntimeObjectKind::GravityPortal;
+            case GameObjectType::ShipPortal:
+            case GameObjectType::CubePortal:
+            case GameObjectType::BallPortal:
+            case GameObjectType::UfoPortal:
+            case GameObjectType::WavePortal:
+            case GameObjectType::RobotPortal:
+            case GameObjectType::SpiderPortal:
+            case GameObjectType::SwingPortal: return RuntimeObjectKind::VehiclePortal;
+            case GameObjectType::RegularSizePortal:
+            case GameObjectType::MiniSizePortal: return RuntimeObjectKind::SizePortal;
+            case GameObjectType::DualPortal:
+            case GameObjectType::SoloPortal: return RuntimeObjectKind::DualPortal;
+            case GameObjectType::TeleportPortal: return RuntimeObjectKind::TeleportPortal;
+            case GameObjectType::DashRing:
+            case GameObjectType::GravityDashRing: return RuntimeObjectKind::DashOrb;
+            case GameObjectType::Modifier: return RuntimeObjectKind::Modifier;
+            case GameObjectType::CollisionObject: return RuntimeObjectKind::CollisionObject;
+            case GameObjectType::Special: return RuntimeObjectKind::Trigger;
+            default: return RuntimeObjectKind::Other;
+        }
+    };
+    auto portalVehicle = [](GameObjectType type) {
+        switch (type) {
+            case GameObjectType::ShipPortal: return RuntimeVehicle::Ship;
+            case GameObjectType::BallPortal: return RuntimeVehicle::Ball;
+            case GameObjectType::UfoPortal: return RuntimeVehicle::Ufo;
+            case GameObjectType::WavePortal: return RuntimeVehicle::Wave;
+            case GameObjectType::RobotPortal: return RuntimeVehicle::Robot;
+            case GameObjectType::SpiderPortal: return RuntimeVehicle::Spider;
+            case GameObjectType::SwingPortal: return RuntimeVehicle::Swing;
+            default: return RuntimeVehicle::Cube;
+        }
+    };
+
+    std::vector<std::unordered_map<int, std::string>> rawProperties;
+    {
+        std::stringstream levelStream(snapshot->rawLevelString);
+        std::string record;
+        bool settings = true;
+        while (std::getline(levelStream, record, ';')) {
+            if (settings) { settings = false; continue; }
+            std::unordered_map<int, std::string> properties;
+            std::stringstream objectStream(record);
+            std::string key;
+            std::string value;
+            while (std::getline(objectStream, key, ',') &&
+                   std::getline(objectStream, value, ',')) {
+                const int numericKey = std::atoi(key.c_str());
+                if (numericKey > 0) properties[numericKey] = value;
+            }
+            rawProperties.push_back(std::move(properties));
+        }
+    }
+
+    if (layer->m_objects) {
+        size_t objectIndex = 0;
+        cocos2d::CCObject* item = nullptr;
+        CCARRAY_FOREACH(layer->m_objects, item) {
+            auto* object = static_cast<GameObject*>(item);
+            if (!object) continue;
+            auto rect = object->getObjectRect();
+            RuntimeObjectSnapshot out;
+            out.uniqueID = object->m_uniqueID;
+            out.editorObjectID = object->m_objectID;
+            out.kind = kind(object->m_objectType);
+            out.runtimeType = static_cast<int>(object->m_objectType);
+            out.vehicle = portalVehicle(object->m_objectType);
+            out.position = {
+                rect.origin.x + rect.size.width * .5f,
+                rect.origin.y + rect.size.height * .5f
+            };
+            out.hitboxSize = {rect.size.width, rect.size.height};
+            out.scale = {object->getScaleX(), object->getScaleY()};
+            out.rotation = object->getRotation();
+            out.active = object->m_isActivated;
+            out.enabled = !object->m_isDisabled;
+            out.flipX = object->m_isFlipX;
+            out.flipY = object->m_isFlipY;
+            if (object->m_groups) {
+                const int count = std::min<int>(object->m_groupCount, 10);
+                for (int index = 0; index < count; ++index)
+                    out.groups.push_back((*object->m_groups)[index]);
+            }
+            if (objectIndex < rawProperties.size())
+                out.properties = rawProperties[objectIndex];
+            ++objectIndex;
+            snapshot->objects.push_back(std::move(out));
+        }
+    }
+    return snapshot;
+}
 
 RuntimeVerificationTask verifyInGameCooperative(
     GJGameLevel* level,

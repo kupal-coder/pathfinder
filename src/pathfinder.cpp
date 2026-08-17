@@ -15,14 +15,14 @@ struct Level2 : public Level {
 	float highestY = 0;
 	using Level::Level;
 
-	Level2(std::string const& lvlString) : Level(lvlString) {
-		// Find highest y
-		for (auto& i : sections) {
-			for (auto& j : i) {
-				highestY = std::max(highestY, j->pos.y);
-			}
-		}
+	void findHighestY() {
+		for (auto& section : sections)
+			for (auto& object : section)
+				highestY = std::max(highestY, object->pos.y);
 	}
+
+	Level2(std::string const& lvlString) : Level(lvlString) { findHighestY(); }
+	Level2(RuntimeLevelSnapshot const& snapshot) : Level(snapshot) { findHighestY(); }
 };
 
 bool isLevelEnd(Level2& lvl) {
@@ -54,8 +54,13 @@ int tryInputs(Level2& lvl, std::set<uint16_t> inputs) {
 	return final;
 }
 
-std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& stop, std::function<void(double)> callback) {
-	Level2 lvl(lvlString);
+std::vector<uint8_t> pathfind(
+	std::string const& lvlString,
+	std::atomic_bool& stop,
+	std::function<void(double)> callback,
+	std::shared_ptr<RuntimeLevelSnapshot const> runtimeSnapshot
+) {
+	Level2 lvl = runtimeSnapshot ? Level2(*runtimeSnapshot) : Level2(lvlString);
 
 	std::random_device rd;
 	std::mt19937 rng(rd());

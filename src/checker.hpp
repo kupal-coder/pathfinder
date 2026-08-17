@@ -6,11 +6,17 @@
 #include <cstdint>
 #include <exception>
 #include <functional>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 class GJGameLevel;
+struct RuntimeLevelSnapshot;
+
+// Captures the game's actual object classification, transformed collision
+// rectangles, groups, and initial player state for consumption by gd-sim.
+std::shared_ptr<RuntimeLevelSnapshot> captureRuntimeSnapshot(GJGameLevel* level);
 
 struct VerificationResult {
     bool completed = false;
