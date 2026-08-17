@@ -12,6 +12,8 @@
 class Level {
 	/// Called by constructor, applies level settings to the initial player state
 	void initLevelSettings(std::string const& lvlSettings, Player& player);
+	/// Post-parse: link teleport portal pairs by group ID
+	void linkTeleportPortals();
  public:
  	/**
  	 * All player states are stored, including previous states. This way, Pathfinder

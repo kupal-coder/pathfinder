@@ -135,7 +135,7 @@ Player::Player() :
 	Entity({{0, 15}, {30, 30}, 0}), frame(1), timeElapsed(0), dead(false),
 	vehicle(Vehicle::from(VehicleType::Cube)),
 	ceiling(999999), floor(0), grounded(true),
-	coyoteFrames(0), acceleration(0), velocity(0),
+	coyoteFrames(0), jumpsRemaining(0), acceleration(0), velocity(0),
 	velocityOverride(false), button(false), input(false),
 	vehicleBuffer(false), upsideDown(false), small(false),
 	speed(1), slopeData({{}, 0, false}), roundVelocity(true) {}

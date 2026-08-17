@@ -60,6 +60,9 @@ struct Player : public Entity {
 	/// Some vehicles have coyote frames for valid inputs
 	unsigned int coyoteFrames;
 
+	/// Robot mode: remaining air jumps available
+	unsigned int jumpsRemaining;
+
 	int speed;
 	int frame;
 

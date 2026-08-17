@@ -97,6 +97,30 @@ constexpr float PHYS_UFO_MAX_FALL_NORM = -345.6f;
 constexpr float PHYS_UFO_MAX_RISE_SMALL = 508.24f;
 constexpr float PHYS_UFO_MAX_FALL_SMALL = -406.56f;
 
+// --- Robot ---
+constexpr float PHYS_ROBOT_GRAVITY[5] = {
+    -2747.52f,
+    -2794.1082f,
+    -2786.4f,
+    -2799.36f,
+    -2799.36f
+};
+
+constexpr float PHYS_ROBOT_JUMP[5] = {
+    573.481728f,
+    603.721717f,
+    616.681728f,
+    606.421728f,
+    606.421728f
+};
+
+constexpr float PHYS_ROBOT_MAX_FALL = -810.0f;
+constexpr int   PHYS_ROBOT_MAX_JUMPS = 2;  // ground jump + 1 air jump
+
+// --- Spider ---
+constexpr float PHYS_SPIDER_GRAVITY = -1676.46672f;
+constexpr float PHYS_SPIDER_MAX_VEL = 810.0f;
+
 // --- General ---
 constexpr float PHYS_FPS = 240.0f;
 constexpr float PHYS_DT = 1.0f / PHYS_FPS;

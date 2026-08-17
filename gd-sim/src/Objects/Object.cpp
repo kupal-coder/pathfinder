@@ -124,7 +124,7 @@ std::optional<ObjectContainer> Object::create(std::unordered_map<int, std::strin
 	objs(({ 35 }), Pad, 25, 4)
 	objs(({ 140 }), Pad, 25, 5)
 	objs(({ 67 }), Pad, 25, 6)
-	objs(({ 36, 84, 141, 1022, 1330, 1333 }), Orb, 36, 36)
+	objs(({ 36, 84, 141, 1022, 1330, 1331, 1332, 1333 }), Orb, 36, 36)
 
 	objs(({ 12, 13, 47, 111 , 660 }), VehiclePortal, 34, 86)
 	objs(({ 10, 11 }), GravityPortal, 25, 75)
@@ -138,6 +138,9 @@ std::optional<ObjectContainer> Object::create(std::unordered_map<int, std::strin
 	objs(({ 202 }), SpeedPortal, 51, 56)
 	objs(({ 203 }), SpeedPortal, 65, 56)
 	objs(({ 1334 }), SpeedPortal, 69, 56)
+
+	// Teleport portals (yellow, blue, green, pink)
+	objs(({ 747, 748, 749, 750 }), TeleportPortal, 30, 30)
 
 	objs(({
 		289, 294, 299, 305, 309, 315, 321, 326, 331, 337,

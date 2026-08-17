@@ -7,7 +7,9 @@ enum class VehicleType {
 	Ship,
 	Ball,
 	Ufo,
-	Wave
+	Wave,
+	Robot,
+	Spider
 };
 
 struct Player;

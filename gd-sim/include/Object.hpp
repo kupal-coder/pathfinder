@@ -6,6 +6,7 @@
 
 struct ObjectContainer;
 struct Player;
+struct TeleportPortal;  // forward declaration for type checking
 
 struct Object : public Entity {
     /// NOT object id. A unique ID associated with each Object for direct comparisons
@@ -26,6 +27,9 @@ struct Object : public Entity {
     /// Where all of the collision magic happens.
     virtual void collide(Player&) const;
 
+    /// Type checking for post-parse linking (teleport portals, etc.)
+    virtual struct TeleportPortal* asTeleportPortal() { return nullptr; }
+
     /// Create an object from a given level string mapping.
     static std::optional<ObjectContainer> create(std::unordered_map<int, std::string>&& ob);
 };
@@ -40,7 +44,7 @@ struct Object : public Entity {
  * it also allows for better CPU caching since all Object classes are stored contiguously in memory.
  */
 struct ObjectContainer {
-    char buffer[sizeof(Object) + 0x8] = {0};
+    char buffer[sizeof(Object) + 0x20] = {0};
 
     ObjectContainer(ObjectContainer& cont) { memcpy(buffer, cont.buffer, sizeof(buffer)); }
     ObjectContainer(ObjectContainer const& cont) { memcpy(buffer, cont.buffer, sizeof(buffer)); }

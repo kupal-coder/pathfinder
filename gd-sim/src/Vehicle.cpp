@@ -313,6 +313,113 @@ Vehicle wave() {
 	return v;
 }
 
+Vehicle robot() {
+	Vehicle v;
+	v.type = VehicleType::Robot;
+
+	v.enter = +[](Player& p) {
+		// Reset jump counter when entering robot mode
+		p.jumpsRemaining = PHYS_ROBOT_MAX_JUMPS;
+		VehicleType pv = p.prevPlayer().vehicle.type;
+		if (pv == VehicleType::Ship || pv == VehicleType::Wave)
+			p.velocity = p.velocity / 4.0f;
+		else
+			p.velocity = p.velocity / 2.0f;
+	};
+
+	v.clamp = +[](Player& p) {
+		if (p.velocity < PHYS_ROBOT_MAX_FALL)
+			p.velocity = PHYS_ROBOT_MAX_FALL;
+		if (p.gravTop(p.innerHitbox()) >= p.gravCeiling())
+			p.dead = true;
+	};
+
+	v.update = +[](Player& p) {
+		p.acceleration = PHYS_ROBOT_GRAVITY[p.speed];
+		p.rotation = 0;
+
+		if (p.grounded) {
+			// Reset jumps when landing
+			p.jumpsRemaining = PHYS_ROBOT_MAX_JUMPS;
+
+			if (p.input) {
+				// Ground jump: full jump force
+				p.setVelocity(PHYS_ROBOT_JUMP[p.speed], p.prevPlayer().input);
+				p.jumpsRemaining = PHYS_ROBOT_MAX_JUMPS - 1;
+				p.grounded = false;
+			} else {
+				// Not holding: cut velocity short for variable jump height
+				if (p.velocity > 0.0f) {
+					p.velocity = 0.0f;
+				}
+			}
+			p.buffer = false;
+		} else if (p.input && p.jumpsRemaining > 0 && !p.prevPlayer().input) {
+			// Air jump: only on new button press, not hold
+			p.setVelocity(PHYS_ROBOT_JUMP[p.speed], false);
+			p.jumpsRemaining--;
+		}
+	};
+
+	v.bounds = FLT_MAX;
+	return v;
+}
+
+Vehicle spider() {
+	Vehicle v;
+	v.type = VehicleType::Spider;
+
+	v.enter = +[](Player& p) {
+		VehicleType pv = p.prevPlayer().vehicle.type;
+		if (pv == VehicleType::Ship || pv == VehicleType::Ufo || pv == VehicleType::Wave)
+			p.velocity = p.velocity / 2.0f;
+	};
+
+	v.clamp = +[](Player& p) {
+		p.velocity = std::clamp(p.velocity, -PHYS_SPIDER_MAX_VEL, PHYS_SPIDER_MAX_VEL);
+	};
+
+	v.update = +[](Player& p) {
+		p.acceleration = PHYS_SPIDER_GRAVITY;
+		p.rotation = 0;
+
+		if (p.grounded) {
+			p.buffer = false;
+		}
+
+		// Spider teleport: on input press, flip gravity and teleport to opposite surface
+		if (p.input && !p.prevPlayer().input) {
+			// Flip gravity direction
+			p.upsideDown = !p.upsideDown;
+
+			// Teleport to the opposite surface
+			// After gravity flip:
+			//   If now upsideDown=true (was on floor): new "floor" is at ceiling
+			//   If now upsideDown=false (was on ceiling): new "floor" is at floor
+			float targetSurfaceY = p.upsideDown ? p.ceiling : p.floor;
+
+			// Position player so their feet touch the new surface
+			// When upsideDown: gravBottom returns -getTop(), so player's "feet" are their top
+			// We want: player's feet (top when upsideDown) = targetSurfaceY
+			if (p.upsideDown) {
+				// Player's top should be at ceiling
+				p.pos.y = targetSurfaceY - p.size.y / 2.0f;
+			} else {
+				// Player's bottom should be at floor
+				p.pos.y = targetSurfaceY + p.size.y / 2.0f;
+			}
+
+			p.velocity = 0.0f;
+			p.velocityOverride = true;
+			p.grounded = true;
+			p.buffer = false;
+		}
+	};
+
+	v.bounds = 240.0f;
+	return v;
+}
+
 Vehicle Vehicle::from(VehicleType v) {
 	switch (v) {
 		case VehicleType::Cube:
@@ -325,5 +432,9 @@ Vehicle Vehicle::from(VehicleType v) {
 			return ufo();
 		case VehicleType::Wave:
 			return wave();
+		case VehicleType::Robot:
+			return robot();
+		case VehicleType::Spider:
+			return spider();
 	}
 }

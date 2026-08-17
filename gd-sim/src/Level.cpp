@@ -1,17 +1,18 @@
 #include <sstream>
 #include <iomanip>
+#include <unordered_map>
+#include <algorithm>
 #include <Level.hpp>
+#include <Portals.hpp>
 
 void Level::initLevelSettings(std::string const& lvlSettings, Player& player) {
 	std::unordered_map<std::string, std::string> obj;
-
 	std::stringstream ss2(lvlSettings);
 	std::string k, v;
 	while (std::getline(ss2, k, ',')) {
 		std::getline(ss2, v, ',');
 		obj[k] = v;
 	}
-
 	// Helper to make a default value for nonexistant keys
 	auto get_or = [&obj](std::string const& key, std::string const& def) {
 		if (auto it = obj.find(key); it != obj.end())
@@ -20,7 +21,6 @@ void Level::initLevelSettings(std::string const& lvlSettings, Player& player) {
 	};
 
 	player.speed = atoi(get_or("kA4", "0"));
-
 	// Robtop stores 1x speed as 0 and slow speed as 1. Very silly
 	if (player.speed == 0)
 		player.speed = 1;
@@ -32,7 +32,6 @@ void Level::initLevelSettings(std::string const& lvlSettings, Player& player) {
 
 	player.upsideDown = atoi(get_or("kA11", "0"));
 	player.vehicle = Vehicle::from(static_cast<VehicleType>(atoi(get_or("kA2", "0"))));
-
 	player.floor = 0;
 	player.ceiling = player.vehicle.bounds;
 }
@@ -55,7 +54,6 @@ Level::Level(std::string const& lvlString) {
 		}
 
 		std::unordered_map<int, std::string> obj;
-
 		std::stringstream ss2(objstr);
 		std::string k, v;
 		while (std::getline(ss2, k, ',')) {
@@ -72,16 +70,13 @@ Level::Level(std::string const& lvlString) {
 
 		if (auto ob_o = Object::create(std::move(obj))) {
 			auto ob = ob_o.value();
-
 			// Unique ID
 			ob->id = objectCount++;
-
 			// Sections are divided by x position in increments of 100
 			size_t sectionPos = std::max(.0f, ob->pos.x / sectionSize);
 			if (sectionPos >= sections.size())
 				sections.resize(sectionPos + 1);
 			sections[sectionPos].push_back(ob);
-
 			if (ob->pos.x > length)
 				length = ob->pos.x + 100;
 		}
@@ -89,11 +84,13 @@ Level::Level(std::string const& lvlString) {
 
 	player.level = this;
 	gameStates.push_back(player);
+
+	// Post-parse linking: connect teleport portal pairs by group ID
+	linkTeleportPortals();
 }
 
 Player& Level::runFrame(bool pressed, float dt) {
 	Player p = gameStates.back();
-
 	// Can't play if you're dead
 	if (p.dead)
 		return gameStates.back();
@@ -121,7 +118,6 @@ Player& Level::runFrame(bool pressed, float dt) {
 	hazards.reserve(100);
 
 	size_t numCollisions = 0;
-
 	for (auto section : sections) {
 		if (section == nullptr) continue;
 		for (auto& o : *section) {
@@ -152,7 +148,6 @@ Player& Level::runFrame(bool pressed, float dt) {
 		if (h->touching(p)) {
 			++numCollisions;
 			h->collide(p);
-			
 		}
 	}
 
@@ -164,7 +159,6 @@ Player& Level::runFrame(bool pressed, float dt) {
 				  << " X " << p.pos.x << " Y " << p.pos.y - 15 << " Vel " << p.velocity
 				  << " Accel " << p.acceleration << " Rot " << p.rotation << " Coll " << numCollisions
  				  << std::endl;
-
 		if (p.button != gameStates.back().button) {
 			std::cout << "Input X " << p.pos.x << " Y " << p.pos.y - 15 << std::endl;
 		}
@@ -173,7 +167,6 @@ Player& Level::runFrame(bool pressed, float dt) {
 	gameStates.push_back(p);
 	return gameStates.back();
 }
-
 
 void Level::rollback(int frame) {
 	gameStates.resize(frame > 0 ? frame : 1);
@@ -193,4 +186,34 @@ Player const& Level::getState(int frame) const {
 
 Player& Level::latestState() {
 	return gameStates.back();
+}
+
+void Level::linkTeleportPortals() {
+	// Collect all teleport portals and group them by groupId
+	std::unordered_map<int, std::vector<TeleportPortal*>> portalGroups;
+
+	for (auto& section : sections) {
+		for (auto& objContainer : section) {
+			// Use virtual type checker to identify teleport portals
+			TeleportPortal* portal = objContainer->asTeleportPortal();
+			if (portal != nullptr && portal->groupId >= 0) {
+				portalGroups[portal->groupId].push_back(portal);
+			}
+		}
+	}
+
+	// Link portals: each group should have exactly 2 portals (entry and exit)
+	for (auto& pair : portalGroups) {
+		auto& portals = pair.second;
+		if (portals.size() >= 2) {
+			// Sort by X position to ensure consistent linking
+			std::sort(portals.begin(), portals.end(),
+				[](TeleportPortal* a, TeleportPortal* b) {
+					return a->pos.x < b->pos.x;
+				});
+			// Link first two portals bidirectionally
+			portals[0]->linkedPortal = portals[1];
+			portals[1]->linkedPortal = portals[0];
+		}
+	}
 }
