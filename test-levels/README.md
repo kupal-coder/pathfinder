@@ -8,10 +8,11 @@ if both replays complete without safe mode and produce identical trace hashes.
 
 ## `object-*.lvl` (Task 1)
 
-There is one focused runtime fixture for each requested feature: dual players,
-upside-down slopes, partial rotation, robot, spider, swing, a spawn/move trigger
-graph, dash orb, linked teleport portals, a 2.2 force block, and the D/J/S/H
-modifier blocks. These deliberately rely on runtime `GameObject` behavior; no
+There is at least one focused runtime fixture for each requested feature: dual
+players, all floor/ceiling slope directions, partial rotations in cube/ball/UFO,
+robot holds, spider, swing, toggle/spawn/move trigger graphs, multiple dash-orb
+directions, linked teleport portals, a 2.2 force block, and individual D/J/S/H
+modifier checks. These deliberately rely on runtime `GameObject` behavior; no
 production object-ID hitbox or behavior table is involved.
 
 ## `runtime-phasing.lvl` (Task 2)
