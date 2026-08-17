@@ -60,7 +60,7 @@ bool isLevelEnd(Level2& lvl) {
 	return lvl.latestState().pos.x >= lvl.length;
 }
 
-int tryInputs(Level2& lvl, std::bitset<65536> const& inputs) {
+int tryInputs(Level2& lvl, std::bitset<65536> const& inputs, int currentBestFrame) {
 	auto frame = lvl.currentFrame();
 	auto press_before = lvl.press;
 
@@ -68,9 +68,16 @@ int tryInputs(Level2& lvl, std::bitset<65536> const& inputs) {
 	int savedStateCount = static_cast<int>(lvl.gameStates.size());
 	auto savedPlayer = lvl.gameStates.back();
 
-	constexpr int maxSimFrames = 1500; // don't simulate forever per try
+	constexpr int maxSimFrames = 1500;
+	constexpr int stuckThreshold = 60;     // frames without forward progress = stuck
+	constexpr int earlyCheckFrame = 400;   // check relative performance after this many frames
+	constexpr int earlyKillMargin = 150;   // if behind by this much at check, kill
+
 	int f = frame;
 	int endFrame = frame + maxSimFrames;
+
+	float lastProgressX = lvl.latestState().pos.x;
+	int framesSinceProgress = 0;
 
 	while (!lvl.gameStates.back().dead && f < endFrame) {
 		if (inputs.test(f)) {
@@ -78,6 +85,29 @@ int tryInputs(Level2& lvl, std::bitset<65536> const& inputs) {
 		}
 		lvl.runFrame(lvl.press);
 		++f;
+
+		// --- Early termination checks ---
+
+		// 1. Stuck detection: no forward progress for too long
+		float currentX = lvl.latestState().pos.x;
+		if (currentX > lastProgressX + 0.5f) {
+			lastProgressX = currentX;
+			framesSinceProgress = 0;
+		} else {
+			++framesSinceProgress;
+			if (framesSinceProgress >= stuckThreshold) {
+				break; // stuck in place, abandon this path
+			}
+		}
+
+		// 2. Relative performance: if clearly behind the best path, give up early
+		if (currentBestFrame > frame + earlyCheckFrame && f == frame + earlyCheckFrame) {
+			int framesSimulated = f - frame;
+			int bestProgress = currentBestFrame - frame;
+			if (framesSimulated < bestProgress - earlyKillMargin) {
+				break; // this path is way behind, no need to continue
+			}
+		}
 	}
 
 	int finalFrame = static_cast<int>(lvl.gameStates.size());
@@ -101,12 +131,13 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 	// Distribution for biased sampling: pick from interesting frames
 	auto const& interesting = lvl.interestingFrames;
 	if (interesting.empty()) {
-		// Fallback: should never happen in a real level, but just in case
 		return {};
 	}
 	std::uniform_int_distribution<int> idxDist(0, static_cast<int>(interesting.size()) - 1);
-	// Fallback: small random offset for variety
 	std::uniform_int_distribution<int> jitterDist(-10, 10);
+
+	// For click pair generation: hold durations from 2 to 25 frames
+	std::uniform_int_distribution<int> holdDist(2, 25);
 
 	int trueBest = 0;
 	int fail = 1;
@@ -115,7 +146,7 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 
 	// Progressive iteration count: start low, increase only when stuck
 	int iterations = 100;
-	constexpr int inputsPerTry = 15; // fewer inputs needed since they're targeted
+	constexpr int pairsPerTry = 8; // 8 pairs = 16 click events, more effective than 15 singles
 
 	while (lvl.gameStates.back().pos.x < lvl.length) {
 		auto frame = lvl.currentFrame();
@@ -123,25 +154,33 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 		int bestFrame = frame;
 
 		// Find the range of interesting frames near our current position
-		// Binary search for the first interesting frame >= current frame
 		auto it = std::lower_bound(interesting.begin(), interesting.end(), frame);
 		int startIdx = static_cast<int>(it - interesting.begin());
+		int availableRange = std::max(1, static_cast<int>(interesting.size() - startIdx));
 
 		for (int i = 0; i < iterations; ++i) {
 			std::bitset<65536> inputs;
 
-			for (int j = 0; j < inputsPerTry; ++j) {
-				// Pick a nearby interesting frame + small jitter
-				int idx = startIdx + (idxDist(rng) % std::max(1, static_cast<int>(interesting.size() - startIdx)));
+			// Generate click PAIRS (press + release) instead of single frames
+			for (int j = 0; j < pairsPerTry; ++j) {
+				// Pick a nearby interesting frame as the PRESS point
+				int idx = startIdx + (idxDist(rng) % availableRange);
 				if (idx >= static_cast<int>(interesting.size()))
 					idx = static_cast<int>(interesting.size()) - 1;
-				int targetFrame = interesting[idx] + jitterDist(rng);
-				if (targetFrame >= frame && targetFrame < 65535) {
-					inputs.set(static_cast<uint16_t>(targetFrame));
+
+				int pressFrame = interesting[idx] + jitterDist(rng);
+				if (pressFrame >= frame && pressFrame < 65534) {
+					inputs.set(static_cast<uint16_t>(pressFrame));
+
+					// Set the RELEASE frame after a random hold duration
+					int releaseFrame = pressFrame + holdDist(rng);
+					if (releaseFrame < 65535) {
+						inputs.set(static_cast<uint16_t>(releaseFrame));
+					}
 				}
 			}
 
-			int nf = tryInputs(lvl, inputs);
+			int nf = tryInputs(lvl, inputs, bestFrame);
 			if (nf > bestFrame) {
 				bestFrame = nf;
 				bestInputs = inputs;
@@ -173,7 +212,7 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 			iterations = 100;
 
 			// Advance 2/3 of the best distance found
-			int advanceTo = bestFrame - (bestFrame - frame) / 3; // same as: frame + (bestFrame-frame)*2/3
+			int advanceTo = bestFrame - (bestFrame - frame) / 3;
 			for (int i = frame; i < advanceTo; ++i) {
 				if (bestInputs.test(i)) {
 					lvl.press = !lvl.press;
