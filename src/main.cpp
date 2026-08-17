@@ -6,15 +6,23 @@
 #include <UIBuilder.hpp>
 #include "pathfinder.hpp"
 #include <future>
+#include <mutex>
 
 using namespace geode::prelude;
 using namespace geode::utils::file;
 
 class PathfinderNode : public CCLayerColor {
     std::atomic_bool m_stop = false;
-    std::atomic<double> m_progress = 0;
-    std::future<std::vector<uint8_t>> m_result;
+    std::future<PathfindResult> m_result;
     std::string m_levelName;
+
+    /// Progress is published from the search thread and read on the main
+    /// thread each frame, so it is guarded rather than passed through a pile
+    /// of separate atomics.
+    std::mutex m_progressMutex;
+    PathfindProgress m_progress;
+    bool m_finalized = false;
+
 public:
     static PathfinderNode* create(std::string const& levelName, std::string const& lvlString) {
         auto node = new PathfinderNode();
@@ -32,9 +40,48 @@ public:
             m_result.get();
     }
 
-    void finalize(std::vector<uint8_t> macro) {
-        getChildByIDRecursive("stop")->setVisible(false);
- 
+    PathfindProgress snapshot() {
+        std::lock_guard<std::mutex> lock(m_progressMutex);
+        return m_progress;
+    }
+
+    void setStatus(std::string const& text) {
+        if (auto label = typeinfo_cast<CCLabelBMFont*>(getChildByIDRecursive("status")))
+            label->setString(text.c_str());
+    }
+
+    void setDetail(std::string const& text) {
+        if (auto label = typeinfo_cast<CCLabelBMFont*>(getChildByIDRecursive("detail")))
+            label->setString(text.c_str());
+    }
+
+    void finalize(PathfindResult result) {
+        if (m_finalized)
+            return;
+        m_finalized = true;
+
+        if (auto stopBtn = getChildByIDRecursive("stop"))
+            stopBtn->setVisible(false);
+
+        // A run that found nothing used to export an empty macro and look like
+        // a success. Say what happened instead.
+        if (result.macro.empty()) {
+            setStatus(result.solved ? "Nothing to export" : "No macro found");
+            setDetail(result.error.empty()
+                ? fmt::format("Reached {:.2f}%", result.percent)
+                : result.error);
+            return;
+        }
+
+        if (result.solved) {
+            setStatus("Solved!");
+            setDetail("Ready to export");
+        } else {
+            setStatus("Partial route");
+            setDetail(fmt::format("Reached {:.2f}% - macro still exportable", result.percent));
+        }
+
+        auto macro = result.macro;
         auto callback = [this, macro](this auto self) -> arc::Future<void> {
             auto saveDir = Mod::get()->getSaveDir();
             if (Loader::get()->isModLoaded("eclipse.eclipse-menu")) {
@@ -79,22 +126,38 @@ public:
         m_levelName = levelName;
 
         m_result = std::async(std::launch::async, [lvlString, this]() {
-            try {
-            return pathfind(lvlString, m_stop, [this](double progress) {
-                if (m_progress < progress)
-                    m_progress = progress;
-            });
-            } catch (std::exception& e) {
-                log::error("{}", e.what());
-                return std::vector<uint8_t>();
-            }
+            PathfindOptions options;
+            // Leave a core free so the game keeps rendering while searching.
+            unsigned hw = std::thread::hardware_concurrency();
+            options.threads = hw > 2 ? hw - 1 : 1;
+
+            return pathfind(lvlString, m_stop, [this](PathfindProgress const& p) {
+                std::lock_guard<std::mutex> lock(m_progressMutex);
+                m_progress = p;
+            }, options);
         });
 
         setKeypadEnabled(true);
 
         Build(this).initTouch().schedule([this](float) {
-                Build(this).intoChildRecurseID<CCLabelBMFont>("percent")
-                    .string(fmt::format("{:.2f}%", m_progress).c_str());
+                if (!m_finalized) {
+                    auto p = snapshot();
+
+                    Build(this).intoChildRecurseID<CCLabelBMFont>("percent")
+                        .string(fmt::format("{:.2f}%", p.percent).c_str());
+
+                    // The old UI only ever showed a high-water mark, so a
+                    // search that was thrashing looked identical to one making
+                    // progress. Surface the stall explicitly.
+                    if (p.stalledRounds > 30) {
+                        setStatus("Backtracking...");
+                        setDetail(fmt::format("exploring alternatives - {} states", p.frontier));
+                    } else {
+                        setStatus("Path finding...");
+                        setDetail(fmt::format("{} states - {}k frames",
+                            p.frontier, p.framesSimulated / 1000));
+                    }
+                }
 
                 if (m_result.valid() && m_result.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
                     finalize(m_result.get());
@@ -104,21 +167,29 @@ public:
         auto handle = [this](CCMenuItemSpriteExtra* it) {
             m_stop = true;
 
-            if (it->getID() == "stop")
-                finalize(m_result.get());
-            else
+            if (it->getID() == "stop") {
+                if (m_result.valid())
+                    finalize(m_result.get());
+            } else {
                 removeFromParentAndCleanup(true);
+            }
         };
 
         auto menu = Build<CCMenu>::create().parent(this).id("menu").children(
             Build<CCScale9Sprite>::create("GJ_square02.png")
-                .contentSize(250, 140),
-            Build<CCLabelBMFont>::create("Pathfinding...", "bigFont.fnt")
-                .move(0, 50)
-                .scale(0.8),
-            Build<CCLabelBMFont>::create("0.00", "chatFont.fnt")
+                .contentSize(280, 160),
+            Build<CCLabelBMFont>::create("Path finding...", "bigFont.fnt")
+                .id("status")
+                .move(0, 58)
+                .scale(0.7),
+            Build<CCLabelBMFont>::create("0.00%", "bigFont.fnt")
                 .id("percent")
-                .move(0, 10),
+                .move(0, 22)
+                .scale(0.9),
+            Build<CCLabelBMFont>::create("starting", "chatFont.fnt")
+                .id("detail")
+                .move(0, -6)
+                .scale(0.65),
             Build<ButtonSprite>::create("Stop", "bigFont.fnt", "GJ_button_04.png")
                 .scale(0.8)
                 .intoMenuItem(handle)
@@ -127,41 +198,29 @@ public:
             Build<CCSprite>::createSpriteName("GJ_closeBtn_001.png")
                 .intoMenuItem(handle)
                 .id("close")
-                .move(-125, 70)
+                .move(-140, 80)
                 .scale(0.8)
         );
-
-        /*    .intoNewChild(CCMenu::create())
-                .id("menu")
-                .intoNewChild(CCScale9Sprite::create("GJ_square04.png"))
-                    .contentSize(250, 140)
-                .intoNewSibling(CCLabelBMFont::create("Pathfinding...", "bigFont.fnt"))
-                    .move(0, 50)
-                    .scale(0.8)
-                .intoNewSibling(CCLabelBMFont::create("0.00", "chatFont.fnt"))
-                    .id("percent")
-                    .move(0, 10)
-                .intoNewSibling(ButtonSprite::create("Stop", "bigFont.fnt", "GJ_button_04.png"))
-                    .intoMenuItem([this]() {
-                        m_stop = true;
-                        finalize(m_result.get());
-                    })
-                    .scale(0.8)
-                    .id("cancel")
-                    .move(0, -40)
-                .intoNewSibling(CCSprite::createWithSpriteFrameName("GJ_closeBtn_001.png"))
-                    .intoMenuItem([this]() {
-                        m_stop = true;
-                        this->removeFromParentAndCleanup(true);
-                    })
-                    .move(-125, 70)
-                    .scale(0.8);*/
-        ;
 
         return true;
     }
 
 };
+
+/// Shared by both entry points so the button behaves identically in each.
+static void startPathfinder(CCNode* parent, GJGameLevel* level) {
+    auto lvlString = ZipUtils::decompressString(level->m_levelString, true, 0);
+
+    if (lvlString.empty()) {
+        FLAlertLayer::create(
+            "Path Finding Pro",
+            "This level has no data to simulate. Try opening it in the editor first.",
+            "OK")->show();
+        return;
+    }
+
+    Build<PathfinderNode>::create(level->m_levelName, lvlString).parent(parent).zOrder(100);
+}
 
 class $modify(EditLevelLayer) {
     bool init(GJGameLevel* p0) {
@@ -177,8 +236,7 @@ class $modify(EditLevelLayer) {
         btn->setTopRelativeScale(1.4);
 
         btn.intoMenuItem([this]() {
-                auto lvlString = ZipUtils::decompressString(m_level->m_levelString, true, 0);
-                Build<PathfinderNode>::create(m_level->m_levelName, lvlString).parent(this).zOrder(100);
+                startPathfinder(this, m_level);
         }).id("pathfinder-button")
           .intoNewParent(CCMenu::create())
           .parent(this)
@@ -205,8 +263,7 @@ class $modify(LevelInfoLayer) {
         btn->setTopRelativeScale(1.4);
 
         btn.intoMenuItem([this]() {
-                auto lvlString = ZipUtils::decompressString(m_level->m_levelString, true, 0);
-                Build<PathfinderNode>::create(m_level->m_levelName, lvlString).parent(this).zOrder(100);
+                startPathfinder(this, m_level);
         }).id("pathfinder-button")
           .parent(getChildByID("other-menu"))
           .matchPos(getChildByIDRecursive("list-button"))

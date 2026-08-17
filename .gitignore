@@ -63,3 +63,7 @@ build-*/
 # CLion
 .idea/
 /cmake-build-*/
+
+# Standalone simulator/search test builds
+build-sim/
+build-asan/

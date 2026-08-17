@@ -20,6 +20,8 @@ int main(int argc, char** argv) {
 
 	Level lvl(levelString);
 
+    // Full history so the printed trace can be cross-checked frame by frame.
+    lvl.setFullHistory(true);
     lvl.debug = true;
     for (size_t i = 2; i < inputs.size(); ++i) {
         auto state = lvl.runFrame(inputs[i] == '1');

@@ -113,7 +113,7 @@ void Block::collide(Player& p) const {
 		}
 	}
 
-	for (auto& entity : p.potentialSlopes) {
+	for (auto* entity : p.level->potentialSlopes()) {
 		auto block_comp = entity->orientation < 2 ? getTop() : getBottom();
 		auto slope_comp = entity->orientation < 2 ? entity->getBottom() : entity->getTop();
 

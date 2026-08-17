@@ -25,7 +25,7 @@ static int frames = 0;
 
 class Replay2 : public gdr::Replay<Replay2, gdr::Input<"">> {
  public:
-    Replay2() : Replay("Pathfinder", 1){}
+    Replay2() : Replay("Path Finding Pro", 1){}
 };
 
 
@@ -102,6 +102,9 @@ void runTestSim(std::string const& level, std::filesystem::path const& path) {
         std::cout.rdbuf(stream.rdbuf());
 
         Level lvl(level);
+        // The overlay draws the whole trajectory, so it needs every frame
+        // retained rather than the bounded search window.
+        lvl.setFullHistory(true);
         lvl.debug = true;
         for (size_t i = 2; i < encoded.size(); ++i) {
             auto state = lvl.runFrame(encoded[i] == '1');

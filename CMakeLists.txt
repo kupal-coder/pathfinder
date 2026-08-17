@@ -5,12 +5,11 @@ set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
 set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreadedDLL)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
-project(pathfinder VERSION 1.0.0)
+project(pathfinder VERSION 1.1.0)
 
 add_library(${PROJECT_NAME} SHARED
     src/main.cpp
     src/pathfinder.cpp
-    src/checker.cpp
     src/debug.cpp
     # Add any extra C++ source files here
 )

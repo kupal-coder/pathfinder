@@ -342,9 +342,7 @@ Vehicle wave() {
 	Vehicle v;
 	v.type = VehicleType::Wave;
 	v.enter = +[](Player& p) {
-		p.actions.push_back(+[](Player& p) {
-			p.size = p.small ? Vec2D(6, 6) : Vec2D(10, 10);
-		});
+		p.pending.push(PendingAction::Kind::WaveSize);
 	};
 
 	v.clamp = +[](Player& p) {
@@ -390,4 +388,8 @@ Vehicle Vehicle::from(VehicleType v) {
 		case VehicleType::Wave:
 			return wave();
 	}
+
+	// An out-of-range VehicleType (a corrupt portal id, say) used to fall off
+	// the end of this function, which is undefined behaviour. Default to cube.
+	return cube();
 }

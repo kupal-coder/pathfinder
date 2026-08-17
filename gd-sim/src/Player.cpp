@@ -44,6 +44,44 @@ double roundVel(double velocity, bool upsideDown) {
 	return nVel * 54.0 * (upsideDown * 2 - 1);
 }
 
+/**
+ * Apply and clear the deferred actions queued during the previous frame.
+ *
+ * These were std::function closures; they are now a POD tag plus payload so
+ * that Player stays trivially copyable. The behaviour of each branch is a
+ * transcription of the closure it replaced.
+ */
+void Player::applyPending() {
+	auto clearSlope = [this]() {
+		slopeData.slope = {};
+		slopeData.elapsed = 0;
+		slopeData.snapDown = false;
+	};
+
+	for (auto const& action : pending) {
+		switch (action.kind) {
+			case PendingAction::Kind::ClearSlope:
+				clearSlope();
+				break;
+			case PendingAction::Kind::SetVelocityClearSlope:
+				velocity = action.value;
+				clearSlope();
+				break;
+			case PendingAction::Kind::SetRoundedVelocityClearSlope:
+				velocity = roundVel(action.value, upsideDown);
+				clearSlope();
+				break;
+			case PendingAction::Kind::WaveSize:
+				size = small ? Vec2D(6, 6) : Vec2D(10, 10);
+				break;
+			case PendingAction::Kind::None:
+				break;
+		}
+	}
+
+	pending.clear();
+}
+
 void Player::preCollision(bool pressed) {
 	pos.x += player_speeds[(int)speed] * dt;
 	pos.y += grav(velocity) * dt;
@@ -61,11 +99,9 @@ void Player::preCollision(bool pressed) {
 		buffer = button;
 	}
 
-	for (auto& i : actions)
-		i(*this);
-	actions.clear();
+	applyPending();
 
-	potentialSlopes.clear();
+	level->clearPotentialSlopes();
 
 	// Downhill slopes snap you automatically
 	if (slopeData.slope && slopeData.slope->gravOrient(*this) == 1) {
@@ -137,7 +173,13 @@ Player::Player() :
 	coyoteFrames(0), acceleration(0), velocity(0),
 	velocityOverride(false), button(false), input(false),
 	vehicleBuffer(false), upsideDown(false), small(false),
-	speed(1), slopeData({{}, 0, false}), roundVelocity(true) {}
+	speed(1), slopeData({{}, 0, false}), roundVelocity(true),
+	// buffer, gravityPortal, dt and level were previously left uninitialised.
+	// Reading them before assignment is undefined behaviour -- UBSan flags a
+	// bool holding 127 -- and it made every state copy carry indeterminate
+	// bytes, which would silently poison state hashing during search.
+	buffer(false), gravityPortal(false), dt(1/240.f), level(nullptr),
+	snapData({}) {}
 
 
 

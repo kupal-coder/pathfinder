@@ -7,7 +7,7 @@
 		"ios": "2.2081"
 	},
 	"geode": "5.3.0",
-	"name": "Pathfinder",
+	"name": "Path Finding Pro",
 	"developer": "camila314",
 	"version": "v1.0.0-beta.243",
 	"dependencies": {
@@ -22,7 +22,7 @@
 			"pathfinder.png"
 		]
 	},
-	"description": "Beat levels automatically!",
+	"description": "Beat levels automatically with a fast physics-simulating solver!",
 	"tags": ["offline", "gameplay", "utility"],
 	"links": {
 	    "community": "https://discord.com/invite/u9m7kqyqxu",

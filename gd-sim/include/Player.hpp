@@ -1,6 +1,8 @@
 #pragma once
 
 #undef small
+#include <cassert>
+#include <cstdint>
 #include <util.hpp>
 #include <Vehicle.hpp>
 #include <Slope.hpp>
@@ -34,6 +36,57 @@ class Level;
 struct Slope;
 
 /**
+ * A deferred effect queued during collision and applied at the start of the
+ * next frame.
+ *
+ * Encoded as a tag plus payload rather than a std::function so that Player
+ * stays trivially copyable and free of heap allocation. The variants below are
+ * exhaustive -- they cover every action the simulator queues.
+ */
+struct PendingAction {
+	enum class Kind : uint8_t {
+		None,
+		/// Leave the current slope (clears slope, elapsed, snapDown).
+		ClearSlope,
+		/// Set velocity to `value`, then clear slope state.
+		SetVelocityClearSlope,
+		/// Set velocity to roundVel(value, upsideDown), then clear slope state.
+		SetRoundedVelocityClearSlope,
+		/// Resize to the wave hitbox, respecting mini.
+		WaveSize,
+	};
+
+	Kind kind = Kind::None;
+	double value = 0.0;
+};
+
+/**
+ * Fixed-capacity queue of pending actions.
+ *
+ * Capacity 4 is generous: the simulator queues at most one slope action and
+ * one vehicle action per frame. Overflow is dropped rather than reallocating,
+ * and asserts in debug builds.
+ */
+struct PendingActions {
+	static constexpr size_t kMax = 4;
+
+	PendingAction items[kMax];
+	uint8_t count = 0;
+
+	inline void push(PendingAction const& a) {
+		if (count < kMax)
+			items[count++] = a;
+		else
+			assert(false && "PendingActions overflow");
+	}
+	inline void push(PendingAction::Kind k, double v = 0.0) { push(PendingAction{k, v}); }
+	inline void clear() { count = 0; }
+	inline bool empty() const { return count == 0; }
+	inline PendingAction const* begin() const { return items; }
+	inline PendingAction const* end() const { return items + count; }
+};
+
+/**
  * The main player. This contains the entire player state and is the only thing that changes each frame.
  */
 struct Player : public Entity {
@@ -47,11 +100,19 @@ struct Player : public Entity {
 	/// See util.hpp for what cow_set is
 	cow_set<int> usedEffects;
 
-	// Potential slopes are important for block collisions. Reset per frame.
-	std::vector<Slope const*> potentialSlopes;
-
-	/// Actions will be ran at the beginning of every frame.
-	std::vector<std::function<void(Player&)>> actions;
+	/**
+	 * Deferred actions, carried into the next frame's preCollision.
+	 *
+	 * This used to be a `std::vector<std::function<void(Player&)>>`, which made
+	 * Player non-trivially-copyable and put a heap allocation on the copy path.
+	 * Since every state is copied per frame -- and, during search, forked many
+	 * times per frame -- that cost dominated.
+	 *
+	 * Every action the simulator actually queues comes from a small closed set,
+	 * so they are encoded as a POD tag plus one payload instead of a closure.
+	 * See PendingAction and applyPending in Player.cpp.
+	 */
+	PendingActions pending;
 
 	/// Slopes have special collision rules. See Slope.cpp for more information.
 	struct {
@@ -114,6 +175,9 @@ struct Player : public Entity {
 	bool roundVelocity;
 
 	Player();
+
+	/// Apply deferred actions queued during the previous frame.
+	void applyPending();
 
 	void preCollision(bool input);
 	void postCollision();

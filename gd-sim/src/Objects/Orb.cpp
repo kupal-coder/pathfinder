@@ -2,7 +2,7 @@
 #include <Player.hpp>
 
 Orb::Orb(Vec2D size, std::unordered_map<int, std::string>&& fields) : EffectObject(size, std::move(fields)) {
-	switch (std::stoi(fields[1])) {
+	switch (atoi(fields[1].c_str())) {
 		case 36:
 			type = OrbType::Yellow;
 			break;

@@ -32,7 +32,22 @@ std::vector<int> unroll(std::vector<range> ranges) {
 			return ObjectContainer(type({w, h}, std::move(ob)));
 
 std::optional<ObjectContainer> Object::create(std::unordered_map<int, std::string>&& ob) {
-	auto id = std::stoi(ob[1]);
+	// Level strings from the wild are frequently truncated or contain junk
+	// fields. A throw here used to abort the entire pathfind and hand the user
+	// an empty macro with no explanation, so unparseable objects are skipped.
+	auto it = ob.find(1);
+	if (it == ob.end())
+		return {};
+
+	int id = 0;
+	try {
+		size_t consumed = 0;
+		id = std::stoi(it->second, &consumed);
+		if (consumed == 0)
+			return {};
+	} catch (...) {
+		return {};
+	}
 
 	objs(({
 		{1, 4}, {6, 7}, 63, {69, 72},

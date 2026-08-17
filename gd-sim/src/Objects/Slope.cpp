@@ -2,6 +2,7 @@
 #include <cmath>
 #include <algorithm>
 #include <Player.hpp>
+#include <Level.hpp>
 
 /// Slopes are possibly the most complicated object. This is still very unfinished!
 
@@ -74,11 +75,7 @@ void Slope::calc(Player& p) const {
 
 		// Coyote frame for slopes must be taken into account
 		if (!touching(p)) {
-			p.actions.push_back(+[](Player& p) {
-				p.slopeData.slope = {};
-				p.slopeData.elapsed = 0.0;
-				p.slopeData.snapDown = false;
-			});
+			p.pending.push(PendingAction::Kind::ClearSlope);
 		}
 
 		//  If player isn't on top already, use expectedY to snap player
@@ -105,24 +102,14 @@ void Slope::calc(Player& p) const {
 			vel *= time;
 
 			// Gotta eject on the next frame
-			p.actions.push_back([vel](Player& p) {
-				p.velocity = roundVel(vel, p.upsideDown);
-
-				p.slopeData.slope = {};
-				p.slopeData.elapsed = 0;
-				p.slopeData.snapDown = false;
-			});
+			p.pending.push(PendingAction::Kind::SetRoundedVelocityClearSlope, vel);
 		}
 	} else if (gravOrient(p.prevPlayer()) == 1) {
 		// Downhill regular slope
 
 		// Velocity up means you're not on slope anymore
 		if (p.velocity > 0) {
-			p.actions.push_back(+[](Player& p) {
-				p.slopeData.slope = {};
-				p.slopeData.elapsed = 0;
-				p.slopeData.snapDown = false;
-			});
+			p.pending.push(PendingAction::Kind::ClearSlope);
 		}
 
 		// Snap to expected Y just like uphill
@@ -145,20 +132,11 @@ void Slope::calc(Player& p) const {
 
 			double vel = -falls[p.speed] * (size.y / size.x);
 			p.velocity = 0;
-			p.actions.push_back([vel](Player& p) {
-				p.velocity = vel;
-				p.slopeData.slope = {};
-				p.slopeData.elapsed = 0;
-				p.slopeData.snapDown = false;
-			});
+			p.pending.push(PendingAction::Kind::SetVelocityClearSlope, vel);
 		}
 	} else if (gravOrient(p.prevPlayer()) == 2) {
 		if (p.velocity < 0) {
-			p.actions.push_back(+[](Player& p) {
-				p.slopeData.slope = {};
-				p.slopeData.elapsed = 0;
-				p.slopeData.snapDown = false;
-			});
+			p.pending.push(PendingAction::Kind::ClearSlope);
 			return;
 		}
 
@@ -172,17 +150,13 @@ void Slope::calc(Player& p) const {
 			p.pos.y = p.grav(p.gravTop(*this));
 			p.velocity = roundVel(p.prevPlayer().acceleration * p.dt, p.prevPlayer().upsideDown);
 
-			p.actions.push_back(+[](Player& p) {
-				p.slopeData.slope = {};
-				p.slopeData.elapsed = 0;
-				p.slopeData.snapDown = false;
-			});
+			p.pending.push(PendingAction::Kind::ClearSlope);
 		}
 	}
 }
 
 void Slope::collide(Player& p) const {
-	p.potentialSlopes.push_back(this);
+	p.level->addPotentialSlope(this);
 
 	if (orientation < 2 && expectedY(p) <= p.pos.y)
 		return;

@@ -1,3 +1,40 @@
+# v1.1.0
+
+Renamed to **Path Finding Pro**.
+
+## New search engine
+- Replaced the random-input search with a parallel, deduplicated best-first
+  search. It backtracks properly instead of re-rolling random inputs, and uses
+  every core instead of one.
+- The search now recognises when a level cannot be beaten and stops, rather
+  than grinding forever on an impossible section.
+- Levels needing a mix of orbs, pads, portals and vehicle changes are solved
+  in well under a second in testing.
+
+## Fixes
+- Macros no longer break on levels longer than ~4.5 minutes. Input frames were
+  stored in 16 bits and silently wrapped past frame 65535, so inputs landed at
+  the wrong place and did nothing.
+- Levels with unusual or truncated object data no longer abort the whole run
+  and hand back an empty macro with no explanation.
+- Fixed a crash on levels containing no recognised objects.
+- Fixed the out-of-bounds check comparing a Y coordinate against level length,
+  so it never worked as intended.
+- Fixed uninitialised player fields that could make runs non-reproducible.
+- Fixed a corrupt vehicle id running off the end of a switch.
+- Blocks at the very start of a level are no longer collision-tested twice.
+
+## Performance
+- Player history is now a bounded window rather than every frame ever
+  simulated: 6 KB instead of ~118 MB on a long level.
+- Branching during search costs ~0.34us, down from ~911us.
+- Removed the two heap allocations that happened on every simulated frame.
+
+## Project
+- Added golden-file physics regression tests, search correctness tests and a
+  benchmark gauntlet, all runnable without the game.
+- CI now runs on every push, including an AddressSanitizer/UBSan job.
+
 # beta 24
 
 - Red Orb & Red Pad
