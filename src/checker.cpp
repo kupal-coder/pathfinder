@@ -199,23 +199,60 @@ std::vector<uint8_t> pathfindInGame(
 
         for (int trialIndex = 0; trialIndex < trialsPerChunk && !stop; ++trialIndex) {
             Trial trial;
-            bool plannedP1 = base.p1Down;
-            bool plannedP2 = base.p2Down;
 
-            // Trial zero is the no-input continuation. Trial one is a dense
-            // pattern useful for robot/cube/ball holds. Other trials are sparse;
-            // spider and swing therefore treat 70 as a cap, never forced spam.
-            for (auto frame : ticks) {
-                const double p = trialIndex == 1 ? .5 : .10;
-                if (trialIndex != 0 && chance(rng) < p) {
-                    plannedP1 = !plannedP1;
-                    trial.events.push_back({frame, false, plannedP1});
+            auto planPlayer = [&](bool player2, bool baseDown, PlayerCheckpoint* state) {
+                if (!state)
+                    return;
+                const bool actionMode = state->m_isSpider || state->m_isSwing;
+                const bool harmlessSpam = state->m_isRobot || state->m_isBall ||
+                    (!state->m_isShip && !state->m_isBird && !state->m_isDart &&
+                     !state->m_isSpider && !state->m_isSwing);
+
+                // Spider and swing presses are discrete actions. Represent each
+                // selected click as a pulse, and never use the constant-spam
+                // trial for these modes. Releases do not consume a click slot.
+                if (actionMode) {
+                    if (baseDown)
+                        trial.events.push_back({base.frame + 1, player2, false});
+                    if (trialIndex == 0)
+                        return;
+                    for (auto frame : ticks) {
+                        if (chance(rng) < .10) {
+                            trial.events.push_back({frame, player2, true});
+                            if (frame + 1 <= base.frame + horizon)
+                                trial.events.push_back({frame + 1, player2, false});
+                        }
+                    }
+                    return;
                 }
-                if (trialIndex != 0 && chance(rng) < p) {
-                    plannedP2 = !plannedP2;
-                    trial.events.push_back({frame, true, plannedP2});
+
+                // Cube, ball and robot can safely test a true 70 CPS pulse
+                // candidate. Ship/UFO/wave need holds, so they only get sparse
+                // state transitions on the same fixed 70 Hz decision clock.
+                if (trialIndex == 1 && harmlessSpam) {
+                    if (baseDown)
+                        trial.events.push_back({base.frame + 1, player2, false});
+                    for (auto frame : ticks) {
+                        trial.events.push_back({frame, player2, true});
+                        if (frame + 1 <= base.frame + horizon)
+                            trial.events.push_back({frame + 1, player2, false});
+                    }
+                    return;
                 }
-            }
+
+                bool plannedDown = baseDown;
+                if (trialIndex != 0) {
+                    for (auto frame : ticks) {
+                        if (chance(rng) < .10) {
+                            plannedDown = !plannedDown;
+                            trial.events.push_back({frame, player2, plannedDown});
+                        }
+                    }
+                }
+            };
+
+            planPlayer(false, base.p1Down, base.checkpoint->m_player1Checkpoint);
+            planPlayer(true, base.p2Down, base.checkpoint->m_player2Checkpoint);
             std::stable_sort(trial.events.begin(), trial.events.end(), [](auto const& a, auto const& b) {
                 return a.frame < b.frame;
             });
