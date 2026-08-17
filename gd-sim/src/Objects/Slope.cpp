@@ -166,6 +166,45 @@ void Slope::calc(Player& p) const {
 				p.slopeData.snapDown = false;
 			});
 		}
+	} else if (gravOrient(p.prevPlayer()) == 3) {
+		// Upside-down downhill slope (ceiling riding, gravity-relative)
+		// This is the mirror of gravOrient == 1 but for inverted gravity
+
+		// Velocity downward (relative to gravity) means leaving the slope
+		if (p.velocity < 0.0f) {
+			p.actions.push_back(+[](Player& p) {
+				p.slopeData.slope = {};
+				p.slopeData.elapsed = 0.0f;
+				p.slopeData.snapDown = false;
+			});
+		}
+
+		// Snap to expected Y — inverted logic for ceiling
+		if (p.gravTop(p.prevPlayer()) != getBottom() || p.slopeData.snapDown) {
+			// On ceiling slopes, we snap to the bottom surface of the slope
+			p.pos.y = std::min(p.pos.y, expectedY(p));
+		}
+
+		// Ejection from ceiling slope — pushes player downward (world space)
+		// which is "upward" relative to inverted gravity
+		if (p.getBottom() >= pos.y) {
+			static constexpr float falls[4] = {
+				226.044054f,
+				280.422108f,
+				348.678108f,
+				421.200108f
+			};
+			// Positive velocity = pushes down in world space = up relative to upside-down gravity
+			float vel = falls[p.speed] * (size.y / size.x);
+			p.velocity = 0.0f;
+
+			p.actions.push_back([vel](Player& p) {
+				p.velocity = vel;
+				p.slopeData.slope = {};
+				p.slopeData.elapsed = 0.0f;
+				p.slopeData.snapDown = false;
+			});
+		}
 	}
 }
 
