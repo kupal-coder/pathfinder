@@ -114,3 +114,11 @@ RuntimeSearchTask pathfindInGame(
     std::atomic_bool& stop,
     std::function<void(SearchProgress const&)> progress
 );
+
+// The original camila314 rolling random-search strategy, backed by exact
+// PlayLayer checkpoints instead of the limited standalone object simulator.
+RuntimeSearchTask pathfindRollingInGame(
+    GJGameLevel* level,
+    std::atomic_bool& stop,
+    std::function<void(SearchProgress const&)> progress
+);

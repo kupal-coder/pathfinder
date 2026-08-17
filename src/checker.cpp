@@ -825,3 +825,251 @@ RuntimeSearchTask pathfindInGame(
         output.inputs.emplace_back(event.frame, event.button, event.player2, event.down);
     co_return output.exportData().unwrapOr({});
 }
+
+RuntimeSearchTask pathfindRollingInGame(
+    GJGameLevel* level,
+    std::atomic_bool& stop,
+    std::function<void(SearchProgress const&)> progress
+) {
+    if (!level)
+        co_return std::vector<uint8_t>{};
+
+    auto previousLayer = PlayLayer::get();
+    CC_SAFE_RETAIN(previousLayer);
+    auto playLayer = PlayLayer::create(level, false, false);
+    if (!playLayer) {
+        CC_SAFE_RELEASE(previousLayer);
+        co_return std::vector<uint8_t>{};
+    }
+    playLayer->retain();
+    struct LayerLifetime {
+        PlayLayer* layer;
+        PlayLayer* previous;
+        ~LayerLifetime() {
+            layer->release();
+            GameManager::sharedState()->m_playLayer = previous;
+            CC_SAFE_RELEASE(previous);
+        }
+    } lifetime {playLayer, previousLayer};
+
+    playLayer->setVisible(false);
+    playLayer->m_isSilent = true;
+    const auto configuredSeed = Mod::get()->getSettingValue<int64_t>("search-seed");
+    const uint32_t runtimeSeed = configuredSeed == 0
+        ? (std::random_device{}() & 0x7fffffffu)
+        : static_cast<uint32_t>(configuredSeed);
+    setRuntimeSeed(playLayer, runtimeSeed);
+    playLayer->resetLevel();
+    playLayer->startGame();
+    CaptureGuard capture;
+
+    constexpr float physicsStep = 1.f / 240.f;
+    constexpr uint32_t horizon = 1000;
+    constexpr int iterations = 64;
+    struct Event { uint32_t frame; uint8_t button; bool player2; bool down; };
+    struct Controls { bool p1 = false; bool p2 = false; };
+    using CheckpointPtr = std::shared_ptr<CheckpointObject>;
+    struct PathLink {
+        std::shared_ptr<PathLink const> parent;
+        std::vector<Event> events;
+    };
+    struct State {
+        CheckpointPtr checkpoint;
+        uint32_t frame = 0;
+        Controls controls;
+        std::shared_ptr<PathLink const> path;
+    };
+    struct Trial {
+        std::vector<Event> events;
+        uint32_t survived = 0;
+        Controls controls;
+        bool completed = false;
+    };
+
+    auto checkpoint = [&]() -> CheckpointPtr {
+        auto value = playLayer->createCheckpoint();
+        value->retain();
+        return {value, [](CheckpointObject* object) { object->release(); }};
+    };
+    auto restore = [&](State const& state, Controls& controls) {
+        playLayer->handleButton(false, 1, false);
+        playLayer->handleButton(false, 1, true);
+        playLayer->loadFromCheckpoint(state.checkpoint.get());
+        if (state.controls.p1) playLayer->handleButton(true, 1, false);
+        if (state.controls.p2) playLayer->handleButton(true, 1, true);
+        controls = state.controls;
+        s_collision = {};
+        s_collision.active = true;
+    };
+    auto flatten = [](std::shared_ptr<PathLink const> link) {
+        std::vector<std::shared_ptr<PathLink const>> links;
+        for (; link; link = link->parent) links.push_back(link);
+        std::vector<Event> result;
+        for (auto it = links.rbegin(); it != links.rend(); ++it)
+            result.insert(result.end(), (*it)->events.begin(), (*it)->events.end());
+        return result;
+    };
+
+    const float startX = playLayer->m_player1->getPositionX();
+    const float endX = playLayer->getEndPosition().x;
+    auto currentProgress = [&] {
+        float value = playLayer->getCurrentPercent();
+        if (value <= 0.f && std::abs(endX - startX) > 1.f)
+            value = 100.f * (playLayer->m_player1->getPositionX() - startX) /
+                (endX - startX);
+        return std::clamp(value, 0.f, 100.f);
+    };
+
+    std::mt19937 rng(runtimeSeed ^ 0x9e3779b9u);
+    std::vector<State> history {{checkpoint(), 0, {}, {}}};
+    int failures = 0;
+    uint64_t expanded = 0;
+    uint64_t physicsFrames = 0;
+    auto started = std::chrono::steady_clock::now();
+    std::vector<Event> solution;
+
+    while (!stop && solution.empty()) {
+        State base = history.back();
+        Trial best;
+        for (int iteration = 0; iteration < iterations && !stop; ++iteration) {
+            Controls controls;
+            restore(base, controls);
+            Trial trial;
+            trial.controls = controls;
+            auto ticks = pathfinder::fixedTickFrames(
+                base.frame + 1, base.frame + horizon, physicsStep);
+            std::unordered_set<uint32_t> selected;
+            if (iteration != 0 && !ticks.empty()) {
+                const size_t choices = std::min<size_t>(30, ticks.size());
+                std::uniform_int_distribution<size_t> pick(0, ticks.size() - 1);
+                while (selected.size() < choices)
+                    selected.insert(ticks[pick(rng)]);
+            }
+            size_t tickIndex = 0;
+            uint32_t releaseP1 = 0;
+            uint32_t releaseP2 = 0;
+            auto send = [&](uint32_t frame, bool player2, bool down) {
+                bool& live = player2 ? trial.controls.p2 : trial.controls.p1;
+                if (live == down) return;
+                playLayer->handleButton(down, 1, player2);
+                live = down;
+                trial.events.push_back({frame, 1, player2, down});
+            };
+            auto act = [&](uint32_t frame, bool player2, PlayerObject* player) {
+                if (player2 && !playLayer->m_gameState.m_isDualMode) return;
+                if (player->m_isSpider || player->m_isSwing) {
+                    send(frame, player2, false);
+                    send(frame, player2, true);
+                    (player2 ? releaseP2 : releaseP1) = frame + 1;
+                } else {
+                    const bool live = player2 ? trial.controls.p2 : trial.controls.p1;
+                    send(frame, player2, !live);
+                }
+            };
+
+            for (uint32_t offset = 1; offset <= horizon; ++offset) {
+                const uint32_t frame = base.frame + offset;
+                if (releaseP1 == frame) { send(frame, false, false); releaseP1 = 0; }
+                if (releaseP2 == frame) { send(frame, true, false); releaseP2 = 0; }
+                if (tickIndex < ticks.size() && ticks[tickIndex] == frame) {
+                    if (selected.contains(frame)) {
+                        act(frame, false, playLayer->m_player1);
+                        if (playLayer->m_gameState.m_isDualMode && (rng() & 1))
+                            act(frame, true, playLayer->m_player2);
+                    }
+                    ++tickIndex;
+                }
+                playLayer->update(physicsStep);
+                ++physicsFrames;
+                trial.survived = offset;
+                if (playLayer->m_hasCompletedLevel) {
+                    trial.completed = true;
+                    break;
+                }
+                if (s_collision.died) break;
+                if (offset % 240 == 0) co_yield true;
+            }
+            ++expanded;
+            if (trial.completed || trial.survived > best.survived)
+                best = std::move(trial);
+            co_yield true;
+            if (best.completed || (best.survived > 500 && failures < 4)) break;
+        }
+
+        if (best.completed) {
+            auto leaf = std::make_shared<PathLink const>(PathLink {
+                base.path, std::move(best.events)
+            });
+            solution = flatten(leaf);
+            break;
+        }
+        if (best.survived < 8) {
+            ++failures;
+            if (history.size() > 1) history.pop_back();
+            if (failures > 20) {
+                rng.seed((runtimeSeed ^ 0x9e3779b9u) + failures * 0x85ebca6bu);
+                failures = 0;
+            }
+            continue;
+        }
+
+        const uint32_t advance = std::max<uint32_t>(1, best.survived * 2 / 3);
+        Controls committedControls;
+        restore(base, committedControls);
+        std::vector<Event> committedEvents;
+        size_t eventIndex = 0;
+        for (uint32_t offset = 1; offset <= advance; ++offset) {
+            const uint32_t frame = base.frame + offset;
+            while (eventIndex < best.events.size() &&
+                   best.events[eventIndex].frame == frame) {
+                auto const event = best.events[eventIndex++];
+                playLayer->handleButton(event.down, event.button, event.player2);
+                (event.player2 ? committedControls.p2 : committedControls.p1) = event.down;
+                committedEvents.push_back(event);
+            }
+            playLayer->update(physicsStep);
+            ++physicsFrames;
+            if (s_collision.died) break;
+        }
+        if (s_collision.died) {
+            ++failures;
+            continue;
+        }
+        auto link = std::make_shared<PathLink const>(PathLink {
+            base.path, std::move(committedEvents)
+        });
+        history.push_back({checkpoint(), base.frame + advance, committedControls, link});
+        failures = 0;
+
+        if (progress) {
+            SearchProgress status;
+            status.percent = currentProgress();
+            status.generation = static_cast<int>(history.size() - 1);
+            status.beamSize = 1;
+            status.horizon = horizon;
+            status.statesExpanded = expanded;
+            status.physicsFrames = physicsFrames;
+            const double elapsed = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - started).count();
+            status.updatesPerSecond = elapsed > 0 ? physicsFrames / elapsed : 0;
+            status.nextEvent = "rolling random search";
+            status.player1Mode = "runtime";
+            status.player2Mode = playLayer->m_gameState.m_isDualMode ? "runtime" : "-";
+            progress(status);
+        }
+    }
+
+    if (solution.empty()) co_return std::vector<uint8_t>{};
+    std::stable_sort(solution.begin(), solution.end(), [](auto const& a, auto const& b) {
+        if (a.frame != b.frame) return a.frame < b.frame;
+        if (a.player2 != b.player2) return a.player2 < b.player2;
+        return a.down < b.down;
+    });
+    PathfinderReplay output;
+    output.seed = static_cast<int>(runtimeSeed);
+    output.framerate = 240.;
+    output.description = fmt::format("level-checksum:{:016x}", levelChecksum(level));
+    for (auto const& event : solution)
+        output.inputs.emplace_back(event.frame, event.button, event.player2, event.down);
+    co_return output.exportData().unwrapOr({});
+}
