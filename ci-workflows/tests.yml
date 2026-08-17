@@ -1,0 +1,56 @@
+name: Tests
+
+# The simulator and the search engine build without the Geode SDK and without
+# the game, so they can be tested on a plain runner on every push.
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  simulator:
+    name: Simulator and search
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S gd-sim -B build-sim -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build-sim -j"$(nproc)"
+
+      - name: Physics golden traces
+        run: ./build-sim/gd-sim-golden verify
+
+      - name: Search correctness
+        run: ./build-sim/gd-sim-searchtest
+
+      - name: Search gauntlet
+        run: ./build-sim/gd-sim-searchbench
+
+  sanitizers:
+    name: Sanitizers
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The simulator does raw memcpy-based type erasure in ObjectContainer and
+      # indexes a ring buffer by frame, so undefined behaviour here would be
+      # both easy to introduce and hard to see. Run the suite under ASan/UBSan.
+      - name: Build with ASan and UBSan
+        run: |
+          cmake -S gd-sim -B build-asan \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
+          cmake --build build-asan -j"$(nproc)"
+
+      - name: Physics golden traces
+        run: ./build-asan/gd-sim-golden verify
+
+      - name: Search correctness
+        run: ./build-asan/gd-sim-searchtest
