@@ -35,9 +35,9 @@ class Level {
 
  	Level(std::string const& lvlString);
 	Level(Level const& other);
-	Level(Level&& other) noexcept;
+	Level(Level&& other);
 	Level& operator=(Level const& other);
-	Level& operator=(Level&& other) noexcept;
+	Level& operator=(Level&& other);
 
  	/// The main update function. Every frame is associated with a press/release state.
 	Player& runFrame(bool pressed, float dt = PHYS_DT);

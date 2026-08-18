@@ -105,7 +105,7 @@ Level::Level(Level const& other)
 	rebindInternalReferences();
 }
 
-Level::Level(Level&& other) noexcept
+Level::Level(Level&& other)
 	: gameStates(std::move(other.gameStates)), objectCount(other.objectCount), sections(std::move(other.sections)),
 	  length(other.length), debug(other.debug) {
 	rebindInternalReferences();
@@ -123,7 +123,7 @@ Level& Level::operator=(Level const& other) {
 	return *this;
 }
 
-Level& Level::operator=(Level&& other) noexcept {
+Level& Level::operator=(Level&& other) {
 	if (this == &other)
 		return *this;
 	gameStates = std::move(other.gameStates);

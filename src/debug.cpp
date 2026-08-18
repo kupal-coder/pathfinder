@@ -95,9 +95,7 @@ void runTestSim(std::string const& level, std::filesystem::path const& path) {
         const auto out = subprocess::check_output({dir, lvlFile, inpFile});
         #endif
 
-        outbuf.assign(out.buf.begin(), out.buf.end());
-        if (!outbuf.empty() && outbuf.back() == '\0')
-            outbuf.pop_back();
+        outbuf.assign(out.buf.data(), out.length);
     } catch (const subprocess::CalledProcessError& e) {
         log::error("{}", e.what());
         return;
