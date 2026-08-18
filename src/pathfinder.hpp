@@ -5,7 +5,12 @@
 #include <string>
 #include <vector>
 
-std::vector<uint8_t> pathfind(
+struct PathfindResult {
+    std::vector<uint8_t> macro;
+    std::string error;
+};
+
+PathfindResult pathfind(
     std::string const& lvlString,
     std::atomic_bool& stop,
     std::function<void(double)> callback

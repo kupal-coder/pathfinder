@@ -50,14 +50,21 @@ std::string pathToUtf8(std::filesystem::path const& path) {
 #endif
 
 
-void runTestSim(std::string const& level, std::filesystem::path const& path) {
+std::string runTestSim(std::string const& level, std::filesystem::path const& path) {
     std::ifstream macro(path, std::ios::binary);
+    if (!macro.is_open())
+        return fmt::format("Failed to open macro file: {}", path.string());
+
     std::vector<uint8_t> data((std::istreambuf_iterator<char>(macro)), std::istreambuf_iterator<char>());
+    if (macro.bad())
+        return fmt::format("Failed to read macro file: {}", path.string());
+    if (data.empty())
+        return fmt::format("Macro file is empty: {}", path.string());
 
     auto replay = Replay2::importData(data);
 
     if (replay.isErr())
-        return;
+        return fmt::format("Failed to parse macro file: {}", path.string());
     auto inputs = replay.unwrap().inputs;
 
     bool currentHold = false;
@@ -76,8 +83,10 @@ void runTestSim(std::string const& level, std::filesystem::path const& path) {
     auto inpFile = Mod::get()->getSaveDir() / ".inp";
 
 
-    writeString(lvlFile, level).unwrap();
-    writeString(inpFile, encoded).unwrap();
+    if (!writeString(lvlFile, level).isOk())
+        return fmt::format("Failed to write temporary level file: {}", lvlFile.string());
+    if (!writeString(inpFile, encoded).isOk())
+        return fmt::format("Failed to write temporary input file: {}", inpFile.string());
 
     std::string outbuf;
 
@@ -98,7 +107,7 @@ void runTestSim(std::string const& level, std::filesystem::path const& path) {
         outbuf.assign(out.buf.data(), out.length);
     } catch (const subprocess::CalledProcessError& e) {
         log::error("{}", e.what());
-        return;
+        return e.what();
     }
     #else
     {
@@ -130,7 +139,7 @@ void runTestSim(std::string const& level, std::filesystem::path const& path) {
 
     if (!writeString(Mod::get()->getSaveDir() / "sim.txt", outbuf).isOk()) {
         log::error("Failed to write to {}", Mod::get()->getSaveDir() / "sim.txt");
-        return;
+        return fmt::format("Failed to write simulation output: {}", (Mod::get()->getSaveDir() / "sim.txt").string());
     }
 
     std::stringstream ss;
@@ -160,6 +169,7 @@ void runTestSim(std::string const& level, std::filesystem::path const& path) {
     /*} catch (const subprocess::CalledProcessError& e) {
         log::error("{}", e.what());
     }*/
+    return {};
 }
 
 class $modify(EditorPauseLayer) {
@@ -218,8 +228,15 @@ class $modify(EditLevelLayer) {
         btn.intoMenuItem(async::wrapSpawn([this](this auto self) -> arc::Future<void> {
             auto lvlString = ZipUtils::decompressString(m_level->m_levelString, true, 0);
 
-            if (auto val = co_await pick(PickMode::OpenFile, {}); val.isOk() && val.unwrap().has_value()) {
-                runTestSim(lvlString, *val.unwrap());
+            auto val = co_await pick(PickMode::OpenFile, {});
+            if (val.isErr()) {
+                log::error("Failed to get file from macro picker");
+                co_return;
+            }
+
+            if (auto selectedPath = val.unwrap(); selectedPath.has_value()) {
+                if (auto error = runTestSim(lvlString, *selectedPath); !error.empty())
+                    log::error("{}", error);
             }
         })).id("pathfinder-debug-button")
           .intoNewParent(CCMenu::create())

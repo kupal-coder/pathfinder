@@ -13,8 +13,9 @@ using namespace geode::utils::file;
 class PathfinderNode : public CCLayerColor {
     std::atomic_bool m_stop = false;
     std::atomic<double> m_progress = 0;
-    std::future<std::vector<uint8_t>> m_result;
+    std::future<PathfindResult> m_result;
     std::string m_levelName;
+    bool m_done = false;
 public:
     static PathfinderNode* create(std::string const& levelName, std::string const& lvlString) {
         auto node = new PathfinderNode();
@@ -32,10 +33,30 @@ public:
             m_result.get();
     }
 
-    void finalize(std::vector<uint8_t> macro) {
+    void setStatus(std::string const& status) {
+        auto label = static_cast<CCLabelBMFont*>(getChildByIDRecursive("percent"));
+        if (!label)
+            return;
+
+        label->setString(status.c_str());
+        label->setScale(0.45f);
+    }
+
+    void finalize(PathfindResult result) {
+        m_done = true;
         getChildByIDRecursive("stop")->setVisible(false);
+
+        if (!result.error.empty()) {
+            setStatus(result.error);
+            return;
+        }
+
+        if (result.macro.empty()) {
+            setStatus("Generated macro was empty.");
+            return;
+        }
  
-        auto callback = [this, macro](this auto self) -> arc::Future<void> {
+        auto callback = [this, macro = std::move(result.macro)](this auto self) -> arc::Future<void> {
             auto saveDir = Mod::get()->getSaveDir();
             if (Loader::get()->isModLoaded("eclipse.eclipse-menu")) {
                 saveDir = Loader::get()->getLoadedMod("eclipse.eclipse-menu")->getSaveDir() / "replays";
@@ -51,12 +72,33 @@ public:
                 std::unordered_set {std::string("gdr2")}
             }});
 
-            if (auto path = co_await pick(PickMode::SaveFile, opts); path.isOk() && path.unwrap().has_value()) {
-                (void)writeBinary(*path.unwrap(), macro);
+            auto path = co_await pick(PickMode::SaveFile, opts);
+            if (path.isErr()) {
+                log::error("Failed to get file from export picker");
                 queueInMainThread([this] {
-                    removeFromParentAndCleanup(true);
+                    setStatus("Failed to get file.");
                 });
+                co_return;
             }
+
+            auto selectedPath = path.unwrap();
+            if (!selectedPath.has_value()) {
+                log::info("Macro export cancelled");
+                co_return;
+            }
+
+            auto writeResult = writeBinary(*selectedPath, macro);
+            if (writeResult.isErr()) {
+                log::error("Failed to write macro file to {}", selectedPath->string());
+                queueInMainThread([this] {
+                    setStatus("Failed to write file.");
+                });
+                co_return;
+            }
+
+            queueInMainThread([this] {
+                removeFromParentAndCleanup(true);
+            });
         };
 
         Build<ButtonSprite>::create("Export", "bigFont.fnt", "GJ_button_01.png")
@@ -86,18 +128,24 @@ public:
             });
             } catch (std::exception& e) {
                 log::error("{}", e.what());
-                return std::vector<uint8_t>();
+                return PathfindResult{{}, "Pathfinding crashed."};
+            } catch (...) {
+                log::error("Unknown error while pathfinding");
+                return PathfindResult{{}, "Pathfinding crashed."};
             }
         });
 
         setKeypadEnabled(true);
 
         Build(this).initTouch().schedule([this](float) {
-                Build(this).intoChildRecurseID<CCLabelBMFont>("percent")
-                    .string(fmt::format("{:.2f}%", m_progress).c_str());
-
                 if (m_result.valid() && m_result.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
                     finalize(m_result.get());
+                    return;
+                }
+
+                if (!m_done) {
+                    Build(this).intoChildRecurseID<CCLabelBMFont>("percent")
+                        .string(fmt::format("{:.2f}%", m_progress).c_str());
                 }
         });
 

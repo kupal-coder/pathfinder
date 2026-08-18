@@ -118,7 +118,7 @@ int tryInputs(Level2& lvl, std::set<int> const& inputs, std::atomic_bool const& 
 	return finalFrame;
 }
 
-std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& stop, std::function<void(double)> callback) {
+PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, std::function<void(double)> callback) {
 	Level2 lvl(lvlString);
 	std::random_device rd;
 	std::mt19937 rng(rd());
@@ -223,5 +223,9 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 		if (state.button != bestStates[index - 1].button)
 			output.inputs.push_back(gdr::Input(state.frame, 1, false, state.button));
 	}
-	return output.exportData().unwrapOr({});
+
+	auto exported = output.exportData();
+	if (exported.isErr())
+		return {{}, "Failed to serialize macro data."};
+	return {exported.unwrap(), {}};
 }
