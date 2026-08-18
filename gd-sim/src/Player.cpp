@@ -132,10 +132,12 @@ void Player::postCollision() {
 }
 
 Player::Player() :
-	Entity({{0, 15}, {30, 30}, 0}), frame(1), timeElapsed(0), dead(false),
-	vehicle(Vehicle::from(VehicleType::Cube)),
-	ceiling(999999), floor(0), grounded(true),
-	coyoteFrames(0), jumpsRemaining(0), acceleration(0), velocity(0),
-	velocityOverride(false), button(false), input(false),
-	vehicleBuffer(false), upsideDown(false), small(false),
-	speed(1), slopeData({{}, 0, false}), roundVelocity(true) {}
+	Entity({{0.0f, 15.0f}, {30.0f, 30.0f}, 0.0f}),
+	vehicle(Vehicle::from(VehicleType::Cube)), level(nullptr), timeElapsed(0.0f),
+	acceleration(0.0f), velocity(0.0f), slopeData({{}, 0.0f, false}),
+	snapData({{{0.0f, 0.0f}, {0.0f, 0.0f}, 0.0f}, 0}),
+	ceiling(999999.0f), floor(0.0f), dt(PHYS_DT), coyoteFrames(0),
+	jumpsRemaining(0), speed(1), frame(1), dead(false), grounded(true),
+	velocityOverride(false), button(false), input(false), buffer(false),
+	vehicleBuffer(false), upsideDown(false), small(false), gravityPortal(false),
+	roundVelocity(true) {}

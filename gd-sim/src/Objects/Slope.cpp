@@ -125,13 +125,7 @@ void Slope::calc(Player& p) const {
 
 		// Ejections, but downwards!
 		if (p.getTop() <= pos.y) {
-			static constexpr float falls[4] = {
-				226.044054f,
-				280.422108f,
-				348.678108f,
-				421.200108f
-			};
-			float vel = -falls[p.speed] * (size.y / size.x);
+			float vel = -0.9f * PHYS_SPEEDS[std::clamp(p.speed, 0, 4)] * (size.y / size.x);
 			p.velocity = 0.0f;
 
 			p.actions.push_back([vel](Player& p) {
@@ -188,14 +182,8 @@ void Slope::calc(Player& p) const {
 		// Ejection from ceiling slope — pushes player downward (world space)
 		// which is "upward" relative to inverted gravity
 		if (p.getBottom() >= pos.y) {
-			static constexpr float falls[4] = {
-				226.044054f,
-				280.422108f,
-				348.678108f,
-				421.200108f
-			};
 			// Positive velocity = pushes down in world space = up relative to upside-down gravity
-			float vel = falls[p.speed] * (size.y / size.x);
+			float vel = 0.9f * PHYS_SPEEDS[std::clamp(p.speed, 0, 4)] * (size.y / size.x);
 			p.velocity = 0.0f;
 
 			p.actions.push_back([vel](Player& p) {

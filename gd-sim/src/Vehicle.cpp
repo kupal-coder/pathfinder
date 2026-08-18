@@ -436,5 +436,7 @@ Vehicle Vehicle::from(VehicleType v) {
 			return robot();
 		case VehicleType::Spider:
 			return spider();
+		default:
+			return cube();
 	}
 }

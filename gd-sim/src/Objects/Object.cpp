@@ -3,6 +3,8 @@
 #include <Level.hpp>
 #include <string>
 #include <cmath>
+#include <cstdlib>
+#include <limits>
 
 #include <Block.hpp>
 #include <Hazard.hpp>
@@ -32,7 +34,14 @@ std::vector<int> unroll(std::vector<range> ranges) {
 			return ObjectContainer(type({w, h}, std::move(ob)));
 
 std::optional<ObjectContainer> Object::create(std::unordered_map<int, std::string>&& ob) {
-	auto id = std::stoi(ob[1]);
+	auto idField = ob.find(1);
+	if (idField == ob.end())
+		return {};
+	char* end = nullptr;
+	long parsedId = std::strtol(idField->second.c_str(), &end, 10);
+	if (end == idField->second.c_str() || *end != '\0' || parsedId < 0 || parsedId > std::numeric_limits<int>::max())
+		return {};
+	auto id = static_cast<int>(parsedId);
 
 	objs(({
 		{1, 4}, {6, 7}, 63, {69, 72},
@@ -124,9 +133,10 @@ std::optional<ObjectContainer> Object::create(std::unordered_map<int, std::strin
 	objs(({ 35 }), Pad, 25, 4)
 	objs(({ 140 }), Pad, 25, 5)
 	objs(({ 67 }), Pad, 25, 6)
-	objs(({ 36, 84, 141, 1022, 1330, 1331, 1332, 1333 }), Orb, 36, 36)
+	objs(({ 1332 }), Pad, 25, 6)
+	objs(({ 36, 84, 141, 1022, 1330, 1333, 1704, 1751 }), Orb, 36, 36)
 
-	objs(({ 12, 13, 47, 111 , 660 }), VehiclePortal, 34, 86)
+	objs(({ 12, 13, 47, 111, 660, 745, 1331 }), VehiclePortal, 34, 86)
 	objs(({ 10, 11 }), GravityPortal, 25, 75)
 
 	objs(({ 99, 101 }), SizePortal, 31, 90)

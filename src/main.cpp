@@ -104,10 +104,13 @@ public:
         auto handle = [this](CCMenuItemSpriteExtra* it) {
             m_stop = true;
 
-            if (it->getID() == "stop")
-                finalize(m_result.get());
-            else
+            if (it->getID() == "stop") {
+                // Do not block the game thread on future::get(); the scheduled callback
+                // finalizes the partial result as soon as the worker acknowledges stop.
+                it->setEnabled(false);
+            } else {
                 removeFromParentAndCleanup(true);
+            }
         };
 
         auto menu = Build<CCMenu>::create().parent(this).id("menu").children(
@@ -165,7 +168,8 @@ public:
 
 class $modify(EditLevelLayer) {
     bool init(GJGameLevel* p0) {
-        EditLevelLayer::init(p0);
+        if (!EditLevelLayer::init(p0))
+            return false;
 
         auto btn = Build<BasedButtonSprite>::create(
             CCSprite::create("pathfinder.png"_spr),
@@ -193,7 +197,8 @@ class $modify(EditLevelLayer) {
 
 class $modify(LevelInfoLayer) {
     bool init(GJGameLevel* level, bool challenge) {
-        LevelInfoLayer::init(level, challenge);
+        if (!LevelInfoLayer::init(level, challenge))
+            return false;
 
         auto btn = Build<BasedButtonSprite>::create(
             CCSprite::create("pathfinder.png"_spr),

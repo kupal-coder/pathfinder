@@ -21,8 +21,13 @@ int main(int argc, char** argv) {
 	Level lvl(levelString);
 
     lvl.debug = true;
-    for (size_t i = 2; i < inputs.size(); ++i) {
-        auto state = lvl.runFrame(inputs[i] == '1');
+    bool pressed = false;
+    size_t frame = 2;
+    while (lvl.latestState().pos.x < lvl.length && !lvl.latestState().dead) {
+        if (frame < inputs.size())
+            pressed = inputs[frame] == '1';
+        auto const& state = lvl.runFrame(pressed);
+        ++frame;
 
         if (state.dead) {
             std::cerr << "Macro failed at frame " << lvl.currentFrame() << std::endl;

@@ -12,7 +12,9 @@
 class Level {
 	/// Called by constructor, applies level settings to the initial player state
 	void initLevelSettings(std::string const& lvlSettings, Player& player);
-	/// Post-parse: link teleport portal pairs by group ID
+	/// Rebind pointers that refer to a particular Level instance after copying/moving.
+	void rebindInternalReferences();
+	/// Post-parse: link teleport portal pairs by group ID.
 	void linkTeleportPortals();
  public:
  	/**
@@ -32,9 +34,13 @@ class Level {
  	bool debug = false;
 
  	Level(std::string const& lvlString);
+	Level(Level const& other);
+	Level(Level&& other) noexcept;
+	Level& operator=(Level const& other);
+	Level& operator=(Level&& other) noexcept;
 
  	/// The main update function. Every frame is associated with a press/release state.
- 	Player& runFrame(bool pressed, float dt = 1/240.);
+	Player& runFrame(bool pressed, float dt = PHYS_DT);
 
  	/// Go back to a certain frame. Used in Pathfinder.
  	void rollback(int frame);

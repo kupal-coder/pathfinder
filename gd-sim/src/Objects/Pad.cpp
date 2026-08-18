@@ -1,5 +1,7 @@
 #include <Pad.hpp>
 #include <Player.hpp>
+#include <cmath>
+#include <algorithm>
 
 Pad::Pad(Vec2D size, std::unordered_map<int, std::string>&& fields) : EffectObject(size, std::move(fields)) {
 	switch (atoi(fields[1].c_str())) {
@@ -20,9 +22,18 @@ Pad::Pad(Vec2D size, std::unordered_map<int, std::string>&& fields) : EffectObje
 			break;
 	}
 
-	if (atoi(fields[5].c_str()) == 1) {
-		rotation += deg2rad(180);
-	}
+	// Entity rotations are stored in degrees throughout the simulator.
+	if (atoi(fields[5].c_str()) == 1)
+		rotation += 180.0f;
+}
+
+namespace {
+VehicleType padPhysicsVehicle(VehicleType type) {
+	// Robot and Spider use the cube's pad impulse values.
+	if (type == VehicleType::Robot || type == VehicleType::Spider)
+		return VehicleType::Cube;
+	return type;
+}
 }
 
 const velocity_map<PadType, VehicleType, bool> pad_velocities = {
@@ -81,8 +92,9 @@ const velocity_map<PadType, VehicleType, bool> pad_velocities = {
 
 void Pad::collide(Player& p) const {
 	if (type == PadType::Blue) {
-		auto rot = rad2deg(std::abs(rotation));
-		if ((rot > 90 && !p.upsideDown) || (rot < 90 && p.upsideDown))
+		float rot = std::fmod(std::abs(rotation), 360.0f);
+		bool facesDown = rot > 90.0f && rot < 270.0f;
+		if ((facesDown && !p.upsideDown) || (!facesDown && p.upsideDown))
 			return;
 
 		// Can't flip twice in a frame with blue pad
@@ -96,7 +108,7 @@ void Pad::collide(Player& p) const {
 	}
 
 	if (p.vehicle.type != VehicleType::Wave)
-		p.velocity = pad_velocities.get(type, p.vehicle.type, p.small, std::min(3, p.speed));
+		p.velocity = pad_velocities.get(type, padPhysicsVehicle(p.vehicle.type), p.small, std::clamp(p.speed, 0, 3));
 
 	p.grounded = false;
 	p.gravityPortal = false;

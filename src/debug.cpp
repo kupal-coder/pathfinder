@@ -1,5 +1,6 @@
 #include <Geode/Geode.hpp>
 #include <UIBuilder.hpp>
+#include <algorithm>
 
 using namespace geode::prelude;
 using namespace geode::utils::file;
@@ -22,6 +23,7 @@ std::vector<CCPoint> s_simPoints;
 std::vector<CCPoint> s_inputPoints;
 std::string realTxt = "";
 static int frames = 0;
+static double s_prevVel = 0.0;
 
 class Replay2 : public gdr::Replay<Replay2, gdr::Input<"">> {
  public:
@@ -36,9 +38,13 @@ class Replay2 : public gdr::Replay<Replay2, gdr::Input<"">> {
 
 std::string pathToUtf8(std::filesystem::path const& path) {
     std::wstring wstr = path.wstring();
-    int count = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), wstr.length(), NULL, 0, NULL, NULL);
-    std::string str(count, 0);
-    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &str[0], count, NULL, NULL);
+    int count = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (count <= 1)
+        return {};
+    std::string str(static_cast<size_t>(count), '\0');
+    if (WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, str.data(), count, nullptr, nullptr) == 0)
+        return {};
+    str.pop_back(); // Remove the converted null terminator.
     return str;
 }
 #endif
@@ -54,17 +60,16 @@ void runTestSim(std::string const& level, std::filesystem::path const& path) {
         return;
     auto inputs = replay.unwrap().inputs;
 
-    std::string encoded = "0";
     bool currentHold = false;
-
-    int maxFrame = inputs.back().frame;
-    for (int i = 1; i < maxFrame; ++i) {
-        if (i == inputs.front().frame) {
-            currentHold = inputs.front().down;
-            inputs.erase(inputs.begin());
+    int maxFrame = inputs.empty() ? 1 : inputs.back().frame;
+    std::string encoded(static_cast<size_t>(std::max(2, maxFrame + 1)), '0');
+    size_t nextInput = 0;
+    for (int frame = 1; frame <= maxFrame; ++frame) {
+        while (nextInput < inputs.size() && inputs[nextInput].frame <= frame) {
+            currentHold = inputs[nextInput].down;
+            ++nextInput;
         }
-
-        encoded += currentHold ? '1' : '0';
+        encoded[static_cast<size_t>(frame)] = currentHold ? '1' : '0';
     }
 
     auto lvlFile = Mod::get()->getSaveDir() / ".lvl";
@@ -90,7 +95,9 @@ void runTestSim(std::string const& level, std::filesystem::path const& path) {
         const auto out = subprocess::check_output({dir, lvlFile, inpFile});
         #endif
 
-        outbuf = std::string(&out.buf[0]);
+        outbuf.assign(out.buf.begin(), out.buf.end());
+        if (!outbuf.empty() && outbuf.back() == '\0')
+            outbuf.pop_back();
     } catch (const subprocess::CalledProcessError& e) {
         log::error("{}", e.what());
         return;
@@ -103,8 +110,13 @@ void runTestSim(std::string const& level, std::filesystem::path const& path) {
 
         Level lvl(level);
         lvl.debug = true;
-        for (size_t i = 2; i < encoded.size(); ++i) {
-            auto state = lvl.runFrame(encoded[i] == '1');
+        bool pressed = false;
+        size_t frame = 2;
+        while (lvl.latestState().pos.x < lvl.length && !lvl.latestState().dead) {
+            if (frame < encoded.size())
+                pressed = encoded[frame] == '1';
+            auto const& state = lvl.runFrame(pressed);
+            ++frame;
 
             if (state.dead) {
                 std::cout << "Macro failed at frame " << lvl.currentFrame() << std::endl;
@@ -193,7 +205,8 @@ class $modify(EditorPauseLayer) {
 
 class $modify(EditLevelLayer) {
     bool init(GJGameLevel* p0) {
-        EditLevelLayer::init(p0);
+        if (!EditLevelLayer::init(p0))
+            return false;
 
         auto btn = Build<BasedButtonSprite>::create(
             CCSprite::create("pathfinder.png"_spr),
@@ -224,7 +237,8 @@ class $modify(EditLevelLayer) {
 
 class $modify(LevelEditorLayer) {
     bool init(GJGameLevel* lvl, bool p1) {
-        LevelEditorLayer::init(lvl, p1);
+        if (!LevelEditorLayer::init(lvl, p1))
+            return false;
         (void)file::writeString(Mod::get()->getSaveDir() / "real.txt", realTxt);
 
         auto b = CCDrawNode::create();
@@ -257,26 +271,18 @@ class $modify(LevelEditorLayer) {
 
 class $modify(GJBaseGameLayer) {
     void updateCamera(float dt) {
-        GJBaseGameLayer::updateCamera(1 / 4.);
-
-        static double prevVel = 0;
-        static double prevX = 0;
-        static double prevXVel = 0; 
+        GJBaseGameLayer::updateCamera(dt);
 
         double vel = m_player1->m_yVelocity * 60 * 0.9 * (m_player1->m_isUpsideDown ? -1 : 1);
-        //log::info("{}", reference_cast<long>(m_player1->m_yVelocity));
-        double xvel = (m_player1->getPositionX() - prevX);
 
-        auto dat = fmt::format("Frame {} X {:.8f} Y {:.8f} Vel {:.8f} Accel {:.8f} Rot {:.8f}", frames, m_player1->getPositionX(), m_player1->getPositionY() - 105, vel, (vel - prevVel) * 240, m_player1->getRotation());
+        auto dat = fmt::format("Frame {} X {:.8f} Y {:.8f} Vel {:.8f} Accel {:.8f} Rot {:.8f}", frames, m_player1->getPositionX(), m_player1->getPositionY() - 105, vel, (vel - s_prevVel) * 240, m_player1->getRotation());
         
         #if DEBUG_MODE
         log::info("{}", dat);
         #endif
 
         frames++;
-        prevVel = vel;
-        prevXVel = xvel;
-        prevX = m_player1->getPositionX();
+        s_prevVel = vel;
 
         if (PlayLayer::get()) {
             realTxt += dat + "\n";
@@ -290,5 +296,6 @@ class $modify(PlayLayer) {
         realTxt = "";
         s_realPoints.clear();
         frames = 0;
+        s_prevVel = 0.0;
     }
 };

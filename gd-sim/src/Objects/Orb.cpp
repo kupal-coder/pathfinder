@@ -1,6 +1,7 @@
 #include <Orb.hpp>
 #include <Player.hpp>
 #include <Physics.hpp>
+#include <algorithm>
 
 Orb::Orb(Vec2D size, std::unordered_map<int, std::string>&& fields) : EffectObject(size, std::move(fields)) {
 	switch (std::stoi(fields[1])) {
@@ -22,8 +23,8 @@ Orb::Orb(Vec2D size, std::unordered_map<int, std::string>&& fields) : EffectObje
 		case 1022:
 			type = OrbType::Green;
 			break;
-		case 1331:
-		case 1332:
+		case 1704:
+		case 1751:
 			type = OrbType::Dash;
 			break;
 		default:
@@ -35,6 +36,15 @@ Orb::Orb(Vec2D size, std::unordered_map<int, std::string>&& fields) : EffectObje
 bool Orb::touching(Player const& p) const {
 	// Coyote frame for orbs
 	return EffectObject::touching(p) || EffectObject::touching(p.prevPlayer());
+}
+
+namespace {
+VehicleType orbPhysicsVehicle(VehicleType type) {
+	// Robot and Spider use the cube's orb impulse values.
+	if (type == VehicleType::Robot || type == VehicleType::Spider)
+		return VehicleType::Cube;
+	return type;
+}
 }
 
 const velocity_map<OrbType, VehicleType, bool> orb_velocities = {
@@ -107,7 +117,7 @@ void Orb::collide(Player& p) const {
 			if (type == OrbType::Black) {
 				p.velocity = -810.0f;
 			} else {
-				p.velocity = orb_velocities.get(type, p.vehicle.type, p.small, std::min(3, p.speed));
+				p.velocity = orb_velocities.get(type, orbPhysicsVehicle(p.vehicle.type), p.small, std::clamp(p.speed, 0, 3));
 				p.grounded = false;
 				if (type == OrbType::Green) {
 					p.velocityOverride = true;

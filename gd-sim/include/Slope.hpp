@@ -5,6 +5,7 @@ struct Slope : public Block {
     int orientation;
 	
     Slope(Vec2D size, std::unordered_map<int, std::string>&& fields);
+    std::unique_ptr<Object> clone() const override { return std::make_unique<Slope>(*this); }
     void collide(Player&) const override;
 
     /**
@@ -29,6 +30,7 @@ struct Slope : public Block {
 
 struct SlopeHazard : public Slope {
     using Slope::Slope;
+    std::unique_ptr<Object> clone() const override { return std::make_unique<SlopeHazard>(*this); }
     void collide(Player&) const override;
     bool touching(Player const&) const override;
     float expectedY(Player const& p) const override;
