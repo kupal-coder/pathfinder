@@ -46,4 +46,4 @@ else()
         $<$<CONFIG:Debug>:-g>
     )
 endif()
-target_link_libraries(${PROJECT_NAME} PRIVATE gd-sim UIBuilder libGDR)
+target_link_libraries(${PROJECT_NAME} gd-sim UIBuilder libGDR)
