@@ -1,11 +1,10 @@
-name: Build Geode Mod
+name: Build Geode Mod (Debug)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - "**"
-  pull_request:
+  #push:
+  #  branches:
+  #    - "**"
 
 jobs:
   build:
@@ -37,18 +36,16 @@ jobs:
 
       - name: Build the mod
         uses: geode-sdk/build-geode-mod@main
-        # `geode sdk install-binaries` only authenticates its api.github.com
-        # release lookup when GITHUB_TOKEN is present. Anonymous requests share
-        # a 60/hour/IP budget with every other job on the runner, and once it is
-        # spent the CLI gets a rate-limit body instead of a release and dies with
-        # `Could not parse Geode release "v5.9.0": error decoding response body`
-        # before CMake runs. The token raises the limit to 1000/hour.
+        # See multi-platform.yml: without GITHUB_TOKEN the SDK binary lookup is
+        # an anonymous api.github.com call and fails with
+        # `Could not parse Geode release ...: error decoding response body`
+        # once the shared per-IP rate limit is exhausted.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          build-config: Debug
           bindings: geode-sdk/bindings
           bindings-ref: main
-          sdk: latest
           combine: true
           target: ${{ matrix.config.target }}
 
