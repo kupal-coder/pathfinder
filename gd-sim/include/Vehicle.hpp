@@ -1,35 +1,52 @@
 #pragma once
 
-#include <functional>
+#include <cstdint>
 
-enum class VehicleType {
-	Cube,
-	Ship,
-	Ball,
-	Ufo,
-	Wave,
-	Robot,
-	Spider
+// Forward declaration
+struct Player;
+
+// =============================================================================
+// Vehicle Gamemodes
+// =============================================================================
+enum class VehicleType : uint8_t {
+    Cube   = 0,
+    Ship   = 1,
+    Ball   = 2,
+    Ufo    = 3,
+    Wave   = 4,
+    Robot  = 5,
+    Spider = 6,
+    Swing  = 7  // Added: GD 2.2 Swing Copter
 };
 
-struct Player;
-struct Object;
+// Function pointer signature for vehicle lifecycle routines
+using VehicleAction = void (*)(Player&);
 
-/// NOT the same as vehicle portal. This class exists to hold vehicle-specific logic.
+/**
+ * Holds vehicle-specific physics and lifecycle handlers.
+ * Optimized with raw function pointers for zero-allocation, fast per-frame copying.
+ */
 struct Vehicle {
-	VehicleType type;
+    VehicleType type = VehicleType::Cube;
 
-	/// When the vehicle is changed into this one.
-	std::function<void(Player&)> enter;
+    /// Called when the player transforms into this vehicle
+    VehicleAction enter  = nullptr;
 
-	/// Ran after everything else, used mainly for vehicles that have ceilings
-	std::function<void(Player&)> clamp;
+    /// Runs after physics, primarily for vehicles restricted by ceilings (e.g. Ship, UFO)
+    VehicleAction clamp  = nullptr;
 
-	/// Vehicle-specific movement, done after collisions
-	std::function<void(Player&)> update;
+    /// Vehicle-specific movement/input calculations executed during physics step
+    VehicleAction update = nullptr;
 
-	/// How far away the floor and ceiling are from each other, relative to portal
-	float bounds;
+    /// Vertical distance between floor and ceiling boundaries
+    float bounds         = 0.0f;
 
-	static Vehicle from(VehicleType v);
+    /// Factory method to construct the pre-configured vehicle definition
+    static Vehicle from(VehicleType v);
+
+    // --- Comparison helpers for clean syntax ---
+    constexpr bool operator==(VehicleType other) const { return type == other; }
+    constexpr bool operator!=(VehicleType other) const { return type != other; }
+    constexpr bool operator==(Vehicle const& other) const { return type == other.type; }
+    constexpr bool operator!=(Vehicle const& other) const { return type != other.type; }
 };
