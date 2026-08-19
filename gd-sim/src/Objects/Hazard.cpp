@@ -1,39 +1,31 @@
 #include <Hazard.hpp>
 #include <Player.hpp>
 #include <cmath>
+#include <algorithm>
 
-Hazard::Hazard(Vec2D size, std::unordered_map<int, std::string>&& fields) : Object(size, std::move(fields)) {
-	// Hazards are processed last, after everything else
-	prio = 2;
+void Hazard::collide(Player& player) const {
+    player.dead = true;
 }
 
-bool Sawblade::touching(Player const& p) const {
-	// Hitbox detection for circle
+bool Sawblade::touching(Player const& player) const {
+    // 1. Get player center and half-extents
+    Entity playerHitbox = player.innerHitbox();
+    float pCenterX = playerHitbox.x + playerHitbox.width * 0.5f;
+    float pCenterY = playerHitbox.y + playerHitbox.height * 0.5f;
+    float pHalfW   = playerHitbox.width * 0.5f;
+    float pHalfH   = playerHitbox.height * 0.5f;
 
-	Vec2D corners[4] = {
-		Vec2D(p.getLeft(), p.getBottom()),
-		Vec2D(p.getRight(), p.getBottom()),
-		Vec2D(p.getRight(), p.getTop()),
-		Vec2D(p.getLeft(), p.getTop())
-	};
+    // 2. Sawblade center and fatal radius (GD saw fatal radius is ~60% of size)
+    float sCenterX = this->x + this->width * 0.5f;
+    float sCenterY = this->y + this->height * 0.5f;
+    float sRadius  = (this->width * 0.5f) * 0.60f; 
 
-	float radius = size.x;
+    // 3. Find closest point on Player AABB to Sawblade Center
+    float closestX = std::clamp(sCenterX, pCenterX - pHalfW, pCenterX + pHalfW);
+    float closestY = std::clamp(sCenterY, pCenterY - pHalfH, pCenterY + pHalfH);
 
-	for (auto& c : corners) {
-		auto diff = c - pos;
-		if (std::sqrt(diff.x * diff.x + diff.y * diff.y) <= radius)
-			return true;
-		c = diff;
-	}
-
-	// Check if sawblade is physically inside the hitbox
-	if (std::signbit(corners[2].x) != std::signbit(corners[0].x) && std::signbit(corners[2].y) != std::signbit(corners[0].y)) {
-		return true;
-	}
-
-	return false;
-}
-
-void Hazard::collide(Player& p) const {
-	p.dead = true;
+    // 4. Circle-to-box distance check
+    float dx = sCenterX - closestX;
+    float dy = sCenterY - closestY;
+    return (dx * dx + dy * dy) <= (sRadius * sRadius);
 }
