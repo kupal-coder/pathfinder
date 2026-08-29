@@ -3,6 +3,10 @@
 #include <cmath>
 #include <algorithm>
 
+Hazard::Hazard(Vec2D size, std::unordered_map<int, std::string>&& fields) : Object(size, std::move(fields)) {
+    prio = 2;
+}
+
 void Hazard::collide(Player& player) const {
     player.dead = true;
 }
