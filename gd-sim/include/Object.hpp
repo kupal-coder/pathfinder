@@ -29,6 +29,7 @@ struct Object : public Entity {
 
     /// Type checking for post-parse linking (teleport portals, etc.)
     virtual struct TeleportPortal* asTeleportPortal() { return nullptr; }
+    virtual struct TeleportPortal const* asTeleportPortal() const { return nullptr; }
 
     /// Create an object from a given level string mapping.
     static std::optional<ObjectContainer> create(std::unordered_map<int, std::string>&& ob);

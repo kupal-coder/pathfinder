@@ -28,7 +28,7 @@ class Level;
  * All physics fields use float to match Geometry Dash's internal 32-bit precision.
  */
 struct Player : public Entity {
-        Vehicle vehicle         = Vehicle::Cube;
+        Vehicle vehicle;
         Level* level            = nullptr;
         
         float timeElapsed       = 0.0f;
