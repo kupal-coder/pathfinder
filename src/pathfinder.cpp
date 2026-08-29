@@ -138,9 +138,54 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 	// For click pair generation: hold durations from 2 to 25 frames
 	std::uniform_int_distribution<int> holdDist(2, 25);
 
-	int trueBest = 0;
-	int fail = 1;
-	int numAway = 1000;
+	// --- Living-checkpoint catalog ---
+	// Every time the sim survives to a new % of the level, its full state gets
+	// catalogued here. When a branch dies (or gets stuck making no progress),
+	// we rewind to the nearest catalogued checkpoint instead of an arbitrary
+	// frame count back — close enough that we're not re-solving the whole
+	// level from scratch, but far enough before the death point that a
+	// different click actually has room to change the outcome instead of
+	// dying the exact same way again.
+	struct CheckpointNode {
+		int frame;
+		float x;
+		Player state;
+		int failCount = 0; // retries from this exact node without escalating further back
+	};
+
+	constexpr float catalogStepPct   = 1.0f;  // catalogue roughly every 1% of level progress
+	constexpr float catalogWindowPct = 10.0f; // GC anything more than ~10% behind our current best
+	constexpr int   minBacktrackGap  = 40;    // frames of clearance a checkpoint needs before a death (room for a press+release)
+	constexpr int   maxFailsAtNode   = 5;     // after this many failed retries, stop reusing this node and go further back
+
+	auto pctOf = [&](float x) {
+		return lvl.length > 0.0f ? (x / lvl.length) * 100.0f : 0.0f;
+	};
+
+	std::vector<CheckpointNode> checkpoints;
+	checkpoints.push_back({lvl.currentFrame(), lvl.latestState().pos.x, lvl.latestState()});
+	float lastCatalogedPct = pctOf(lvl.latestState().pos.x);
+
+	auto catalogAndPrune = [&]() {
+		float pct = pctOf(lvl.latestState().pos.x);
+		if (pct - lastCatalogedPct < catalogStepPct) return;
+
+		checkpoints.push_back({lvl.currentFrame(), lvl.latestState().pos.x, lvl.latestState()});
+		lastCatalogedPct = pct;
+
+		// Drop anything that's fallen too far behind our current progress —
+		// e.g. once we're at 17%, the 1-9% checkpoints no longer help us
+		// backtrack usefully. Index 0 is always kept as a last-resort anchor
+		// back to the very start of the level.
+		float cutoffPct = pct - catalogWindowPct;
+		if (checkpoints.size() > 1) {
+			checkpoints.erase(
+				std::remove_if(checkpoints.begin() + 1, checkpoints.end() - 1,
+					[&](CheckpointNode const& c) { return pctOf(c.x) < cutoffPct; }),
+				checkpoints.end() - 1);
+		}
+	};
+
 	Level2 lvlBest = lvl;
 
 	// Progressive iteration count: start low, increase only when stuck
@@ -184,30 +229,48 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 				bestFrame = nf;
 				bestInputs = inputs;
 				// Early exit if we found great progress
-				if (bestFrame - frame > 500 && fail < 1000)
+				if (bestFrame - frame > 500)
 					break;
 			}
 		}
 
 		if (bestFrame == frame) {
-			// No progress — roll back and increase iterations for next time
-			lvl.rollback(std::max(std::max(frame - fail, trueBest - numAway), 1));
-			lvl.press = lvl.gameStates.back().button;
-			fail += 5;
-			iterations = std::min(iterations + 30, 250); // ramp up when stuck
+			// No progress this pass — rewind to the nearest catalogued
+			// checkpoint that's far enough back to give a different click
+			// room to matter, instead of landing right back at the same death.
+			int deathFrame = frame;
+			CheckpointNode* target = nullptr;
 
-			if (fail > numAway + 1000) {
-				numAway += 1000;
-				fail = 1;
-				if (numAway > 10000) {
-					numAway = 1000;
-					trueBest = 0;
-					lvl.rollback(1);
-					lvl.press = lvl.gameStates.back().button;
-				}
-			} else if (fail > 100) {
-				fail += 50;
+			for (int i = static_cast<int>(checkpoints.size()) - 1; i >= 0; --i) {
+				auto& cp = checkpoints[i];
+				if (cp.frame > deathFrame - minBacktrackGap) continue; // too close, no room to react differently
+				target = &cp;
+				if (cp.failCount < maxFailsAtNode) break; // still usable — stop here
+				// else: this node is worn out, keep walking further back
 			}
+
+			if (target) {
+				target->failCount++;
+				lvl.gameStates.resize(target->frame);
+				lvl.gameStates.back() = target->state;
+				lvl.press = target->state.button;
+
+				// Anything catalogued ahead of where we just rewound to
+				// belonged to the branch we're abandoning — throw it out,
+				// since jumping to it later would leave a gap of uninitialized
+				// states in gameStates.
+				checkpoints.erase(
+					std::remove_if(checkpoints.begin(), checkpoints.end(),
+						[&](CheckpointNode const& c) { return c.frame > target->frame; }),
+					checkpoints.end());
+				lastCatalogedPct = pctOf(target->x);
+			} else {
+				// Nothing catalogued far back enough yet (very early in the level)
+				lvl.rollback(1);
+				lvl.press = lvl.gameStates.back().button;
+			}
+
+			iterations = std::min(iterations + 30, 250); // ramp up when stuck
 		} else {
 			// Progress made — reset to lower iterations
 			iterations = 100;
@@ -220,13 +283,10 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 				}
 				lvl.runFrame(lvl.press);
 			}
+
+			catalogAndPrune();
 		}
 
-		if (lvl.currentFrame() > trueBest) {
-			trueBest = lvl.currentFrame();
-			fail = 0;
-			numAway = 1000;
-		}
 		if (lvl.currentFrame() > lvlBest.currentFrame()) {
 			lvlBest = lvl;
 		}
