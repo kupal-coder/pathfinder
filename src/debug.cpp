@@ -204,7 +204,7 @@ class $modify(DebugEditLevelLayer, EditLevelLayer) {
 
         btn->setTopRelativeScale(1.4);
 
-        btn.intoMenuItem(async::wrapSpawn([this](this auto self) -> arc::Future<void> {
+        btn.intoMenuItem(async::wrapSpawn([this]() -> arc::Future<void> {
             auto lvlString = ZipUtils::decompressString(m_level->m_levelString, true, 0);
 
             if (auto val = co_await pick(PickMode::OpenFile, {}); val.isOk() && val.unwrap().has_value()) {

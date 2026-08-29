@@ -1,27 +1,27 @@
-# Pathfinder
+# Pathfinding Pro
 
-Auto-generate macros for levels using simulation! This mod uses a physics simulator under the hood to solve levels in seconds! It does not come with a bot, you will need to install one for this.
+**Pathfinding Pro** (by **percjue**) automatically generates frame-exact bot macros for Geometry Dash levels using high-speed 240Hz physics simulation! Solve and pathfind levels in seconds, then export ready-to-play `.gdr2` replays for your favorite bot or replay engine.
 
-# None of these objects are supported
-- Duals
-- Upside-down Slopes
-- Partially Rotated Objects for Cube, UFO, Ball
-- Robot Mode
-- Spider Mode
-- Swing Mode
-- Any Non-Visual Triggers
-- Dash Orbs
-- Teleport Portals
-- Anything from 2.2
-- Modifier blocks (D-block J-block etc)
+---
 
-# How To Use
+### ✨ Features & Supported Mechanics
+- **Physics Engine**: Discrete 240Hz simulation for Cube, Ship, Ball, UFO, Wave, Robot, and Spider modes.
+- **2.1 Support**: Dash Orbs, Green Gravity-Flip Orbs, Spider Orbs/Pads, D-Blocks (Wave Slide), H-Blocks (Ceiling Bump Safety), J-Blocks (Jump Buffer Blocker), and S-Blocks (Stop Dash).
+- **Speed Tiers**: Full velocity curves for 0.5x, 1x, 2x, 3x, and 4x speeds.
+- **Portals**: Gravity, Size, Speed, Dual, and Mirror Portals.
+- **Replay Export**: One-click `.gdr2` replay file export directly to your Geode / Eclipse replays folder.
 
-1. Go to a level you want to pathfind, either in your saved or an online level.
-2. Click the blue Pathfinder button to start the pathfinder.
-3. Export the macro into the correct folder of whichever bot you are using.
-4. Import the macro and play it back!
+---
 
-# Report Bugs
+### 🎮 How to Use
+1. Open any saved or online level in Geometry Dash.
+2. Click the **Pathfinding Pro** button on the level screen or editor.
+3. Watch the real-time progress solver calculate the exact jump trajectory.
+4. Click **Export** to save your macro.
+5. Load the replay in your bot (e.g. Eclipse, xBot, MegaHack) and enjoy!
 
-Any simulation bugs need to be reported in the [Discord](https://discord.gg/u9m7kqyqxu)
+---
+
+### 🐛 Support & Community
+For suggestions, bug reports, and updates, join the community [Discord](https://discord.gg/u9m7kqyqxu).
+

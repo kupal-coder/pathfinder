@@ -9,7 +9,11 @@
 
 class Replay2 : public gdr::Replay<Replay2, gdr::Input<"">> {
  public:
-	Replay2() : Replay("Pathfinder", 1){}
+	Replay2() : Replay("Pathfinding Pro", 1) {
+		this->author = "percjue";
+		this->description = "Auto-generated macro by Pathfinding Pro";
+		this->framerate = 240.0;
+	}
 };
 
 struct Level2 : public Level {
@@ -188,6 +192,7 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 		if (bestFrame == frame) {
 			// No progress — roll back and increase iterations for next time
 			lvl.rollback(std::max(std::max(frame - fail, trueBest - numAway), 1));
+			lvl.press = lvl.gameStates.back().button;
 			fail += 5;
 			iterations = std::min(iterations + 30, 250); // ramp up when stuck
 
@@ -198,6 +203,7 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 					numAway = 1000;
 					trueBest = 0;
 					lvl.rollback(1);
+					lvl.press = lvl.gameStates.back().button;
 				}
 			} else if (fail > 100) {
 				fail += 50;
@@ -232,9 +238,15 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 	}
 
 	Replay2 output;
-	for (auto& i : lvlBest.gameStates) {
-	    if (i.frame > 1 && i.button != i.prevPlayer().button)
-	        output.inputs.push_back(gdr::Input(i.frame, 1, false, i.button));
+	bool lastButton = false;
+	for (auto const& st : lvlBest.gameStates) {
+		if (st.frame >= 1 && st.button != lastButton) {
+			output.inputs.push_back(gdr::Input(static_cast<uint32_t>(st.frame), 1, false, st.button));
+			lastButton = st.button;
+		}
+	}
+	if (lastButton && !lvlBest.gameStates.empty()) {
+		output.inputs.push_back(gdr::Input(static_cast<uint32_t>(lvlBest.gameStates.back().frame + 1), 1, false, false));
 	}
 	return output.exportData().unwrapOr({});
 }

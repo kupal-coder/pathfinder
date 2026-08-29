@@ -44,7 +44,7 @@ public:
             stopBtn->setVisible(false);
         }
  
-        auto callback = [this](this auto self) -> arc::Future<void> {
+        auto callback = [this]() -> arc::Future<void> {
             auto saveDir = Mod::get()->getSaveDir();
             if (Loader::get()->isModLoaded("eclipse.eclipse-menu")) {
                 saveDir = Loader::get()->getLoadedMod("eclipse.eclipse-menu")->getSaveDir() / "replays";

@@ -102,9 +102,9 @@ export function App() {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="font-extrabold text-base tracking-tight text-white">Pathfinder</h1>
+                <h1 className="font-extrabold text-base tracking-tight text-white">Pathfinding Pro</h1>
                 <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800/60">
-                  GD 2.1 Physics
+                  by percjue
                 </span>
                 <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400">
                   240Hz Engine
@@ -123,7 +123,7 @@ export function App() {
               className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-cyan-500/20 active:scale-95 transition-all disabled:opacity-50"
             >
               <Sparkles className="w-4 h-4" />
-              {isSolving ? 'Solving Trajectory...' : 'Run Pathfinder Solver'}
+              {isSolving ? 'Solving Trajectory...' : 'Run Pathfinding Pro Solver'}
             </button>
           </div>
         </div>

@@ -193,10 +193,10 @@ export const EngineInspector: React.FC = () => {
           <div className="space-y-3">
             <div className="flex items-center gap-2 p-2.5 bg-neutral-950 border border-neutral-800 rounded-lg text-xs font-mono">
               <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>Geode Mod Target: <strong>camila314.pathfinder</strong> (Geode v5.10.0+, GD v2.2081 / 2.1 Engine)</span>
+              <span>Geode Mod Target: <strong>camila314.pathfinder</strong> (Pathfinding Pro by <strong>percjue</strong> • Geode v5.10.0+)</span>
             </div>
             <p className="text-xs text-neutral-400 leading-relaxed">
-              Pathfinder utilizes sub-process physics checking with <code className="text-cyan-300 font-mono">gd-sim</code> and Geode <code className="text-cyan-300 font-mono">PlayerObject</code> memory hooks. The simulator accurately mirrors in-game frame calculations down to discrete sub-pixel floating point precision.
+              <strong>Pathfinding Pro</strong> utilizes discrete sub-process physics checking with <code className="text-cyan-300 font-mono">gd-sim</code> and Geode <code className="text-cyan-300 font-mono">PlayerObject</code> memory hooks. The simulator accurately mirrors in-game frame calculations down to discrete sub-pixel floating point precision.
             </p>
           </div>
         )}

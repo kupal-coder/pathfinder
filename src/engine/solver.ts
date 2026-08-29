@@ -123,7 +123,8 @@ export class LevelSolver {
   public static exportFormat(events: { frame: number; down: boolean }[], format: 'json' | 'xbot' | 'megahack' | 'plain'): string {
     if (format === 'json') {
       return JSON.stringify({
-        generator: 'Pathfinder v1.0.0-beta.243',
+        generator: 'Pathfinding Pro v1.0.0 (by percjue)',
+        author: 'percjue',
         fps: 240,
         totalActions: events.length,
         events: events.map(e => ({ frame: e.frame, hold: e.down, player: 1 }))

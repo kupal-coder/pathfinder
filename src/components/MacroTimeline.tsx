@@ -38,7 +38,7 @@ export const MacroTimeline: React.FC<MacroTimelineProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `pathfinder_macro.${exportFormat === 'json' ? 'json' : 'txt'}`;
+    link.download = `pathfinding_pro_macro.${exportFormat === 'json' ? 'json' : 'txt'}`;
     link.click();
     URL.revokeObjectURL(url);
   };
