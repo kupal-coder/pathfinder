@@ -120,10 +120,13 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 	std::random_device rd;
 	std::mt19937 rng(rd());
 
-	// Distribution for biased sampling: pick from interesting frames
-	auto const& interesting = lvl.interestingFrames;
+	// Biased sampling fallback: if no objects found, sample uniformly
+	std::vector<int> interesting = lvl.interestingFrames;
 	if (interesting.empty()) {
-		return {};
+		int maxF = std::max(100, static_cast<int>((lvl.length / 400.0f) * 240.0f));
+		for (int f = 1; f < maxF; f += 10) {
+			interesting.push_back(f);
+		}
 	}
 	std::uniform_int_distribution<int> idxDist(0, static_cast<int>(interesting.size()) - 1);
 	std::uniform_int_distribution<int> jitterDist(-10, 10);

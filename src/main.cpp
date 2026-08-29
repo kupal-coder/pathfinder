@@ -14,6 +14,8 @@ class PathfinderNode : public CCLayerColor {
     std::atomic_bool m_stop = false;
     std::atomic<double> m_progress = 0;
     std::future<std::vector<uint8_t>> m_result;
+    bool m_finalized = false;
+    std::vector<uint8_t> m_macroData;
     std::string m_levelName;
 public:
     static PathfinderNode* create(std::string const& levelName, std::string const& lvlString) {
@@ -34,37 +36,76 @@ public:
     }
 
     void finalize(std::vector<uint8_t> macro) {
-        getChildByIDRecursive("stop")->setVisible(false);
+        if (m_finalized) return;
+        m_finalized = true;
+        m_macroData = macro;
+
+        if (auto stopBtn = getChildByIDRecursive("stop")) {
+            stopBtn->setVisible(false);
+        }
  
-        auto callback = [this, macro](this auto self) -> arc::Future<void> {
+        auto callback = [this](this auto self) -> arc::Future<void> {
             auto saveDir = Mod::get()->getSaveDir();
             if (Loader::get()->isModLoaded("eclipse.eclipse-menu")) {
                 saveDir = Loader::get()->getLoadedMod("eclipse.eclipse-menu")->getSaveDir() / "replays";
             }
 
-            if (!exists(saveDir)) {
-                create_directories(saveDir);
+            std::error_code ec;
+            if (!std::filesystem::exists(saveDir, ec)) {
+                std::filesystem::create_directories(saveDir, ec);
             }
 
+            // Sanitize filename for Android and Windows filesystem safety
+            std::string safeName = m_levelName.empty() ? "level" : m_levelName;
+            for (char& c : safeName) {
+                if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
+                    c = '_';
+                }
+            }
+
+            auto defaultPath = saveDir / fmt::format("{}.gdr2", safeName);
+
             FilePickOptions opts(
-                saveDir / fmt::format("{}.gdr2", m_levelName), {{
+                defaultPath, {{
                 std::string("Macro File"),
                 std::unordered_set {std::string("gdr2")}
             }});
 
-            if (auto path = co_await pick(PickMode::SaveFile, opts); path.isOk() && path.unwrap().has_value()) {
-                (void)writeBinary(*path.unwrap(), macro);
-                queueInMainThread([this] {
-                    removeFromParentAndCleanup(true);
-                });
+            auto path = co_await pick(PickMode::SaveFile, opts);
+            std::filesystem::path targetPath;
+            if (path.isOk() && path.unwrap().has_value()) {
+                targetPath = *path.unwrap();
+            } else {
+                // Fallback direct save if system picker fails or is unsupported on the platform
+                targetPath = defaultPath;
             }
+
+            if (!m_macroData.empty()) {
+                auto writeRes = writeBinary(targetPath, m_macroData);
+                if (writeRes.isOk()) {
+                    log::info("Successfully exported macro to {}", targetPath.string());
+                    Notification::create("Macro exported successfully!", NotificationIcon::Success)->show();
+                } else {
+                    log::error("Failed to write macro: {}", writeRes.unwrapErr());
+                    Notification::create("Failed to write macro file", NotificationIcon::Error)->show();
+                }
+            } else {
+                log::warn("Pathfinder macro data is empty (no inputs were recorded or level was not solved)");
+                Notification::create("Warning: Macro data is empty", NotificationIcon::Warning)->show();
+            }
+
+            queueInMainThread([this] {
+                removeFromParentAndCleanup(true);
+            });
         };
 
-        Build<ButtonSprite>::create("Export", "bigFont.fnt", "GJ_button_01.png")
-            .intoMenuItem(async::wrapSpawn(callback))
-            .scale(0.8)
-            .move(0, -40)
-            .parent(getChildByID("menu"));
+        if (auto menu = getChildByID("menu")) {
+            Build<ButtonSprite>::create("Export", "bigFont.fnt", "GJ_button_01.png")
+                .intoMenuItem(async::wrapSpawn(callback))
+                .scale(0.8)
+                .move(0, -40)
+                .parent(menu);
+        }
     }
 
     void keyBackClicked() override  {
