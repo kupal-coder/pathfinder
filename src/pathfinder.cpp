@@ -1,6 +1,9 @@
 #include <set>
 #include <bitset>
 #include <algorithm>
+#include <atomic>
+#include <thread>
+#include <mutex>
 #include <Level.hpp>
 #include <Physics.hpp>
 #include <random>
@@ -119,64 +122,53 @@ int tryInputs(Level2& lvl, std::bitset<65536> const& inputs, int currentBestFram
 	return finalFrame;
 }
 
-std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& stop, std::function<void(double)> callback) {
-	Level2 lvl(lvlString);
-	std::random_device rd;
-	std::mt19937 rng(rd());
+namespace {
 
-	// Biased sampling fallback: if no objects found, sample uniformly
-	std::vector<int> interesting = lvl.interestingFrames;
-	if (interesting.empty()) {
-		int maxF = std::max(100, static_cast<int>((lvl.length / 400.0f) * 240.0f));
-		for (int f = 1; f < maxF; f += 10) {
-			interesting.push_back(f);
-		}
-	}
-	std::uniform_int_distribution<int> idxDist(0, static_cast<int>(interesting.size()) - 1);
-	std::uniform_int_distribution<int> jitterDist(-10, 10);
+// A single catalogued "this was alive here" snapshot.
+struct CheckpointNode {
+	int frame;
+	float x;
+	Player state;
+	int failCount = 0; // retries from this exact node without escalating further back
+};
 
-	// For click pair generation: hold durations from 2 to 25 frames
-	std::uniform_int_distribution<int> holdDist(2, 25);
-
-	// --- Living-checkpoint catalog ---
-	// Every time the sim survives to a new % of the level, its full state gets
-	// catalogued here. When a branch dies (or gets stuck making no progress),
-	// we rewind to the nearest catalogued checkpoint instead of an arbitrary
-	// frame count back — close enough that we're not re-solving the whole
-	// level from scratch, but far enough before the death point that a
-	// different click actually has room to change the outcome instead of
-	// dying the exact same way again.
-	struct CheckpointNode {
-		int frame;
-		float x;
-		Player state;
-		int failCount = 0; // retries from this exact node without escalating further back
-	};
-
-	constexpr float catalogStepPct   = 1.0f;  // catalogue roughly every 1% of level progress
-	constexpr float catalogWindowPct = 10.0f; // GC anything more than ~10% behind our current best
-	constexpr int   minBacktrackGap  = 40;    // frames of clearance a checkpoint needs before a death (room for a press+release)
-	constexpr int   maxFailsAtNode   = 5;     // after this many failed retries, stop reusing this node and go further back
-
-	auto pctOf = [&](float x) {
-		return lvl.length > 0.0f ? (x / lvl.length) * 100.0f : 0.0f;
-	};
-
+// All the state for one independent line of search. Several of these run
+// concurrently on their own threads; periodically the ones that have fallen
+// behind get pulled back up to whichever branch is currently in the lead.
+struct SearchBranch {
+	Level2 lvl;
+	Level2 lvlBest;                       // this branch's own best-ever-reached state
 	std::vector<CheckpointNode> checkpoints;
-	checkpoints.push_back({lvl.currentFrame(), lvl.latestState().pos.x, lvl.latestState()});
-	float lastCatalogedPct = pctOf(lvl.latestState().pos.x);
+	std::mt19937 rng;
+	int iterations = 100;
+	int stuckStreak = 0;                  // consecutive failed passes, used to widen the backtrack gap
+	float lastCatalogedPct = 0.0f;
 
-	auto catalogAndPrune = [&]() {
+	SearchBranch(Level2 const& seed, uint32_t seedVal)
+		: lvl(seed), lvlBest(seed), rng(seedVal) {
+		checkpoints.push_back({lvl.currentFrame(), lvl.latestState().pos.x, lvl.latestState()});
+		lastCatalogedPct = pctOf(lvl.latestState().pos.x);
+	}
+
+	float pctOf(float x) const {
+		return lvl.length > 0.0f ? (x / lvl.length) * 100.0f : 0.0f;
+	}
+
+	// Every time the sim survives to a new % of the level, its full state
+	// gets catalogued. Anything that's fallen well behind current progress
+	// gets dropped — e.g. once we're at 17%, the 1-9% checkpoints no longer
+	// help us backtrack usefully. Index 0 always stays as a last-resort
+	// anchor back to the very start of the level.
+	void catalogAndPrune() {
+		constexpr float catalogStepPct   = 1.0f;
+		constexpr float catalogWindowPct = 10.0f;
+
 		float pct = pctOf(lvl.latestState().pos.x);
 		if (pct - lastCatalogedPct < catalogStepPct) return;
 
 		checkpoints.push_back({lvl.currentFrame(), lvl.latestState().pos.x, lvl.latestState()});
 		lastCatalogedPct = pct;
 
-		// Drop anything that's fallen too far behind our current progress —
-		// e.g. once we're at 17%, the 1-9% checkpoints no longer help us
-		// backtrack usefully. Index 0 is always kept as a last-resort anchor
-		// back to the very start of the level.
 		float cutoffPct = pct - catalogWindowPct;
 		if (checkpoints.size() > 1) {
 			checkpoints.erase(
@@ -184,118 +176,231 @@ std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& st
 					[&](CheckpointNode const& c) { return pctOf(c.x) < cutoffPct; }),
 				checkpoints.end() - 1);
 		}
-	};
 
-	Level2 lvlBest = lvl;
+		// Failures heal while things are going well — a node that failed a
+		// few times shouldn't be permanently written off.
+		for (auto& cp : checkpoints) {
+			if (cp.failCount > 0) cp.failCount--;
+		}
+	}
 
-	// Progressive iteration count: start low, increase only when stuck
-	int iterations = 100;
-	constexpr int pairsPerTry = 8; // 8 pairs = 16 click events, more effective than 15 singles
+	// Replace this branch's active state wholesale — used both to catch a
+	// straggler branch up to the current global leader, and to fall back to
+	// this branch's own best-ever point when its local catalog runs dry.
+	void resetTo(Level2 const& source) {
+		lvl = source;
+		checkpoints.clear();
+		checkpoints.push_back({lvl.currentFrame(), lvl.latestState().pos.x, lvl.latestState()});
+		lastCatalogedPct = pctOf(lvl.latestState().pos.x);
+		stuckStreak = 0;
+		iterations = 100;
+	}
 
-	while (lvl.gameStates.back().pos.x < lvl.length) {
-		auto frame = lvl.currentFrame();
-		std::bitset<65536> bestInputs;
-		int bestFrame = frame;
+	// Called when a pass makes no forward progress at all. Rewinds to the
+	// nearest checkpoint that has enough clearance before the death point to
+	// give a different click room to matter, instead of just dying the same
+	// way again. That clearance grows the longer we've been stuck here, and
+	// a checkpoint gets skipped in favor of an earlier one once it's proven
+	// to be a dead end too many times.
+	void handleStuck() {
+		constexpr int minBacktrackGap   = 40;  // frames of clearance on the very first retry
+		constexpr int gapGrowthPerFail  = 15;  // extra frames of clearance per consecutive failure
+		constexpr int maxBacktrackGap   = 600; // cap so we don't eventually rewind the whole level every time
+		constexpr int maxFailsAtNode    = 5;   // after this many failed retries, stop reusing this node
 
-		// Find the range of interesting frames near our current position
-		auto it = std::lower_bound(interesting.begin(), interesting.end(), frame);
-		int startIdx = static_cast<int>(it - interesting.begin());
-		int availableRange = std::max(1, static_cast<int>(interesting.size() - startIdx));
+		stuckStreak++;
+		int dynamicGap = std::min(minBacktrackGap + (stuckStreak - 1) * gapGrowthPerFail, maxBacktrackGap);
 
-		for (int i = 0; i < iterations; ++i) {
-			std::bitset<65536> inputs;
+		int deathFrame = lvl.currentFrame();
+		CheckpointNode* target = nullptr;
 
-			// Generate click PAIRS (press + release) instead of single frames
-			for (int j = 0; j < pairsPerTry; ++j) {
-				// Pick a nearby interesting frame as the PRESS point
-				int idx = startIdx + (idxDist(rng) % availableRange);
-				if (idx >= static_cast<int>(interesting.size()))
-					idx = static_cast<int>(interesting.size()) - 1;
+		for (int i = static_cast<int>(checkpoints.size()) - 1; i >= 0; --i) {
+			auto& cp = checkpoints[i];
+			if (cp.frame > deathFrame - dynamicGap) continue; // too close, no room to react differently
+			target = &cp;
+			if (cp.failCount < maxFailsAtNode) break; // still usable — stop here
+			// else: this node is worn out, keep walking further back
+		}
 
-				int pressFrame = interesting[idx] + jitterDist(rng);
-				if (pressFrame >= frame && pressFrame < 65534) {
-					inputs.set(static_cast<uint16_t>(pressFrame));
+		if (target) {
+			target->failCount++;
+			lvl.gameStates.resize(target->frame);
+			lvl.gameStates.back() = target->state;
+			lvl.press = target->state.button;
 
-					// Set the RELEASE frame after a random hold duration
-					int releaseFrame = pressFrame + holdDist(rng);
-					if (releaseFrame < 65535) {
-						inputs.set(static_cast<uint16_t>(releaseFrame));
+			// Anything catalogued ahead of where we just rewound to belonged
+			// to the branch we're abandoning — throw it out, since jumping to
+			// it later would leave a gap of uninitialized states behind it.
+			checkpoints.erase(
+				std::remove_if(checkpoints.begin(), checkpoints.end(),
+					[&](CheckpointNode const& c) { return c.frame > target->frame; }),
+				checkpoints.end());
+			lastCatalogedPct = pctOf(target->x);
+		} else if (lvlBest.currentFrame() > 1) {
+			// Our local catalog is exhausted — the required gap has grown
+			// past our entire recorded history. Fall back to the best point
+			// this branch has ever reached rather than restarting from
+			// frame 1 every time.
+			resetTo(lvlBest);
+		} else {
+			// Truly nothing to fall back on yet.
+			lvl.rollback(1);
+			lvl.press = lvl.gameStates.back().button;
+		}
+	}
+
+	void recordProgress() {
+		stuckStreak = 0;
+		iterations = 100;
+		catalogAndPrune();
+		if (lvl.currentFrame() > lvlBest.currentFrame()) {
+			lvlBest = lvl;
+		}
+	}
+};
+
+} // namespace
+
+std::vector<uint8_t> pathfind(std::string const& lvlString, std::atomic_bool& stop, std::function<void(double)> callback) {
+	Level2 seed(lvlString);
+
+	// Biased sampling fallback: if no objects found, sample uniformly.
+	// Shared read-only across every branch — never mutated after this point.
+	std::vector<int> interesting = seed.interestingFrames;
+	if (interesting.empty()) {
+		int maxF = std::max(100, static_cast<int>((seed.length / 400.0f) * 240.0f));
+		for (int f = 1; f < maxF; f += 10) {
+			interesting.push_back(f);
+		}
+	}
+
+	// Run several independent searches in parallel instead of one. Leave one
+	// core free for the game itself (this mod runs alongside GD, not instead
+	// of it), and cap at 4 — more than that gives diminishing returns for how
+	// cheap each individual simulated frame is.
+	unsigned int hc = std::thread::hardware_concurrency();
+	int numBranches = hc == 0 ? 2 : static_cast<int>(std::clamp(hc - 1, 1u, 4u));
+
+	std::random_device rd;
+	std::vector<SearchBranch> branches;
+	branches.reserve(numBranches);
+	for (int b = 0; b < numBranches; ++b) {
+		branches.emplace_back(seed, rd());
+	}
+
+	// The current best-progressed state across ALL branches. Acts as a
+	// shared "best-ever-reached" archive: stragglers periodically get pulled
+	// up to it instead of continuing to dig at an inferior line, and it's
+	// what actually gets exported at the end.
+	std::mutex leaderMtx;
+	Level2 leader = seed;
+	std::atomic<double> globalProgress{0.0};
+
+	constexpr int   syncEveryPasses    = 25;  // how often a branch checks in against the others
+	constexpr float behindPctToResync  = 3.0f; // how far behind the leader before a branch gives up and joins it
+	constexpr int   pairsPerTry        = 8;   // 8 pairs = 16 click events, more effective than 15 singles
+
+	auto runBranch = [&](SearchBranch& branch) {
+		std::uniform_int_distribution<int> idxDist(0, static_cast<int>(interesting.size()) - 1);
+		std::uniform_int_distribution<int> jitterDist(-10, 10);
+		std::uniform_int_distribution<int> holdDist(2, 25); // hold durations from 2 to 25 frames
+
+		int passesSinceSync = 0;
+
+		while (!stop && branch.lvl.gameStates.back().pos.x < branch.lvl.length) {
+			auto frame = branch.lvl.currentFrame();
+			std::bitset<65536> bestInputs;
+			int bestFrame = frame;
+
+			// Find the range of interesting frames near our current position
+			auto it = std::lower_bound(interesting.begin(), interesting.end(), frame);
+			int startIdx = static_cast<int>(it - interesting.begin());
+			int availableRange = std::max(1, static_cast<int>(interesting.size() - startIdx));
+
+			for (int i = 0; i < branch.iterations; ++i) {
+				std::bitset<65536> inputs;
+
+				// Generate click PAIRS (press + release) instead of single frames
+				for (int j = 0; j < pairsPerTry; ++j) {
+					int idx = startIdx + (idxDist(branch.rng) % availableRange);
+					if (idx >= static_cast<int>(interesting.size()))
+						idx = static_cast<int>(interesting.size()) - 1;
+
+					int pressFrame = interesting[idx] + jitterDist(branch.rng);
+					if (pressFrame >= frame && pressFrame < 65534) {
+						inputs.set(static_cast<uint16_t>(pressFrame));
+
+						int releaseFrame = pressFrame + holdDist(branch.rng);
+						if (releaseFrame < 65535) {
+							inputs.set(static_cast<uint16_t>(releaseFrame));
+						}
+					}
+				}
+
+				int nf = tryInputs(branch.lvl, inputs, bestFrame);
+				if (nf > bestFrame) {
+					bestFrame = nf;
+					bestInputs = inputs;
+					if (bestFrame - frame > 500)
+						break;
+				}
+			}
+
+			if (bestFrame == frame) {
+				branch.handleStuck();
+				branch.iterations = std::min(branch.iterations + 30, 250); // ramp up when stuck
+			} else {
+				// Advance 2/3 of the best distance found
+				int advanceTo = bestFrame - (bestFrame - frame) / 3;
+				for (int i = frame; i < advanceTo; ++i) {
+					if (bestInputs.test(i)) {
+						branch.lvl.press = !branch.lvl.press;
+					}
+					branch.lvl.runFrame(branch.lvl.press);
+				}
+				branch.recordProgress();
+			}
+
+			// --- Cross-branch sync ---
+			// Either report a new global best, or — if we've fallen well
+			// behind whoever currently has one — abandon our own line and
+			// continue from theirs instead.
+			if (++passesSinceSync >= syncEveryPasses) {
+				passesSinceSync = 0;
+				std::lock_guard<std::mutex> lock(leaderMtx);
+				if (branch.lvlBest.currentFrame() > leader.currentFrame()) {
+					leader = branch.lvlBest;
+				} else {
+					float leaderPct = branch.pctOf(leader.latestState().pos.x);
+					float ownPct = branch.pctOf(branch.lvlBest.latestState().pos.x);
+					if (leaderPct - ownPct > behindPctToResync) {
+						branch.resetTo(leader);
 					}
 				}
 			}
 
-			int nf = tryInputs(lvl, inputs, bestFrame);
-			if (nf > bestFrame) {
-				bestFrame = nf;
-				bestInputs = inputs;
-				// Early exit if we found great progress
-				if (bestFrame - frame > 500)
-					break;
-			}
+			double p = std::min((branch.lvl.latestState().pos.x / branch.lvl.length) * 100.0f, 100.0f);
+			double prev = globalProgress.load();
+			while (p > prev && !globalProgress.compare_exchange_weak(prev, p)) {}
+			if (callback) callback(globalProgress.load());
 		}
 
-		if (bestFrame == frame) {
-			// No progress this pass — rewind to the nearest catalogued
-			// checkpoint that's far enough back to give a different click
-			// room to matter, instead of landing right back at the same death.
-			int deathFrame = frame;
-			CheckpointNode* target = nullptr;
-
-			for (int i = static_cast<int>(checkpoints.size()) - 1; i >= 0; --i) {
-				auto& cp = checkpoints[i];
-				if (cp.frame > deathFrame - minBacktrackGap) continue; // too close, no room to react differently
-				target = &cp;
-				if (cp.failCount < maxFailsAtNode) break; // still usable — stop here
-				// else: this node is worn out, keep walking further back
-			}
-
-			if (target) {
-				target->failCount++;
-				lvl.gameStates.resize(target->frame);
-				lvl.gameStates.back() = target->state;
-				lvl.press = target->state.button;
-
-				// Anything catalogued ahead of where we just rewound to
-				// belonged to the branch we're abandoning — throw it out,
-				// since jumping to it later would leave a gap of uninitialized
-				// states in gameStates.
-				checkpoints.erase(
-					std::remove_if(checkpoints.begin(), checkpoints.end(),
-						[&](CheckpointNode const& c) { return c.frame > target->frame; }),
-					checkpoints.end());
-				lastCatalogedPct = pctOf(target->x);
-			} else {
-				// Nothing catalogued far back enough yet (very early in the level)
-				lvl.rollback(1);
-				lvl.press = lvl.gameStates.back().button;
-			}
-
-			iterations = std::min(iterations + 30, 250); // ramp up when stuck
-		} else {
-			// Progress made — reset to lower iterations
-			iterations = 100;
-
-			// Advance 2/3 of the best distance found
-			int advanceTo = bestFrame - (bestFrame - frame) / 3;
-			for (int i = frame; i < advanceTo; ++i) {
-				if (bestInputs.test(i)) {
-					lvl.press = !lvl.press;
-				}
-				lvl.runFrame(lvl.press);
-			}
-
-			catalogAndPrune();
+		// Final check-in in case this branch never got to sync mid-run
+		// (e.g. it finished the level before the interval came up).
+		std::lock_guard<std::mutex> lock(leaderMtx);
+		if (branch.lvlBest.currentFrame() > leader.currentFrame()) {
+			leader = branch.lvlBest;
 		}
+	};
 
-		if (lvl.currentFrame() > lvlBest.currentFrame()) {
-			lvlBest = lvl;
-		}
-		if (callback)
-			callback(std::min((lvl.latestState().pos.x / lvl.length) * 100, 100.0f));
-
-		if (stop)
-			break;
+	std::vector<std::thread> threads;
+	threads.reserve(numBranches);
+	for (auto& branch : branches) {
+		threads.emplace_back(runBranch, std::ref(branch));
 	}
+	for (auto& t : threads) t.join();
+
+	Level2& lvlBest = leader;
 
 	Replay2 output;
 	bool lastButton = false;
