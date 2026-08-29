@@ -56,11 +56,24 @@ void Player::preCollision(bool pressed) {
 	velocityOverride = false;
 	gravityPortal = false;
 	roundVelocity = true;
+	hasHBlock = false;
+	hasDBlock = false;
+	hasJBlock = false;
 
 	if (button != pressed) {
 		button = pressed;
 		input = button;
 		buffer = button;
+	}
+
+	if (isDashing) {
+		if (!input) {
+			isDashing = false;
+		} else {
+			velocity = 0.0f;
+			velocityOverride = true;
+			grounded = false;
+		}
 	}
 
 	for (auto& i : actions)
@@ -73,6 +86,84 @@ void Player::preCollision(bool pressed) {
 	if (slopeData.slope && slopeData.slope->gravOrient(*this) == 1) {
 		grounded = true;
 	}
+}
+
+void Player::spiderTeleport(bool reverseGravity) {
+	if (reverseGravity) {
+		upsideDown = !upsideDown;
+	}
+
+	float playerLeft = pos.x - size.x * 0.5f;
+	float playerRight = pos.x + size.x * 0.5f;
+	float currentY = pos.y;
+
+	float targetY = upsideDown ? (ceiling > 0.0f ? ceiling - size.y * 0.5f : 300.0f) : (floor + size.y * 0.5f);
+	float closestDist = 999999.0f;
+	bool hitHazard = false;
+
+	if (level != nullptr && !level->sections.empty()) {
+		size_t sectionIdx = std::min(std::max(0, (int)(pos.x / Level::sectionSize)), (int)level->sections.size() - 1);
+		size_t minSec = (sectionIdx > 0) ? sectionIdx - 1 : 0;
+		size_t maxSec = std::min(level->sections.size() - 1, sectionIdx + 1);
+
+		for (size_t sec = minSec; sec <= maxSec; ++sec) {
+			for (auto const& obj : level->sections[sec]) {
+				float objLeft = obj->pos.x - obj->size.x * 0.5f;
+				float objRight = obj->pos.x + obj->size.x * 0.5f;
+
+				// Overlap on X axis
+				if (playerRight >= objLeft && playerLeft <= objRight) {
+					if (upsideDown) {
+						// Teleporting upwards towards ceiling
+						float surfY = obj->pos.y - obj->size.y * 0.5f;
+						if (surfY > currentY - 1.0f) {
+							float dist = surfY - currentY;
+							if (dist < closestDist) {
+								if (obj->prio == 1) { // Block
+									closestDist = dist;
+									targetY = surfY - size.y * 0.5f;
+									hitHazard = false;
+								} else if (obj->prio == 2) { // Hazard
+									closestDist = dist;
+									targetY = surfY;
+									hitHazard = true;
+								}
+							}
+						}
+					} else {
+						// Teleporting downwards towards floor
+						float surfY = obj->pos.y + obj->size.y * 0.5f;
+						if (surfY < currentY + 1.0f) {
+							float dist = currentY - surfY;
+							if (dist < closestDist) {
+								if (obj->prio == 1) { // Block
+									closestDist = dist;
+									targetY = surfY + size.y * 0.5f;
+									hitHazard = false;
+								} else if (obj->prio == 2) { // Hazard
+									closestDist = dist;
+									targetY = surfY;
+									hitHazard = true;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if (hitHazard) {
+		pos.y = targetY;
+		dead = true;
+		return;
+	}
+
+	pos.y = targetY;
+	velocity = 0.0f;
+	velocityOverride = true;
+	grounded = true;
+	buffer = false;
 }
 
 void Player::postCollision() {

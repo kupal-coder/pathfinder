@@ -110,10 +110,24 @@ struct Player : public Entity {
         /// Robot mode: Whether the initial ground jump was initiated and button is held
         bool isRobotBoosting  : 1 = false;
 
+        /// GD 2.1: Dash Orb State
+        bool isDashing        : 1 = false;
+        float dashAngle       = 0.0f;
+
+        /// GD 2.1: Special Collision Block modifiers (reset per frame)
+        bool hasHBlock        : 1 = false; // Prevents head collision death
+        bool hasDBlock        : 1 = false; // Allows Wave to slide on blocks
+        bool hasJBlock        : 1 = false; // Prevents jump buffering
+
+        /// GD 1.8-2.1: Dual & Mirror state
+        bool dual             : 1 = false;
+        bool mirror           : 1 = false;
+
         Player();
 
         void preCollision(bool input);
         void postCollision();
+        void spiderTeleport(bool reverseGravity = true);
 
         Entity unrotatedHitbox() const;
 

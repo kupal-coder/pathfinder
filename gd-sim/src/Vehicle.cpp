@@ -46,8 +46,14 @@ Vehicle cube() {
     v.clamp = +[](Player& p) {
         if (p.velocity < PHYS_CUBE_MAX_FALL)
             p.velocity = PHYS_CUBE_MAX_FALL;
-        if (p.gravTop(p.innerHitbox()) >= p.gravCeiling())
-            p.dead = true;
+        if (p.gravTop(p.innerHitbox()) >= p.gravCeiling()) {
+            if (!p.hasHBlock) {
+                p.dead = true;
+            } else {
+                p.pos.y = p.grav(p.gravCeiling()) - p.grav(p.size.y * 0.5f);
+                if (p.grav(p.velocity) > 0.0f) p.velocity = 0.0f;
+            }
+        }
     };
 
     v.update = +[](Player& p) {
@@ -345,8 +351,14 @@ Vehicle robot() {
     v.clamp = +[](Player& p) {
         if (p.velocity < PHYS_ROBOT_MAX_FALL)
             p.velocity = PHYS_ROBOT_MAX_FALL;
-        if (p.gravTop(p.innerHitbox()) >= p.gravCeiling())
-            p.dead = true;
+        if (p.gravTop(p.innerHitbox()) >= p.gravCeiling()) {
+            if (!p.hasHBlock) {
+                p.dead = true;
+            } else {
+                p.pos.y = p.grav(p.gravCeiling()) - p.grav(p.size.y * 0.5f);
+                if (p.grav(p.velocity) > 0.0f) p.velocity = 0.0f;
+            }
+        }
     };
 
     v.update = +[](Player& p) {
@@ -407,25 +419,24 @@ Vehicle spider() {
         p.acceleration = PHYS_SPIDER_GRAVITY;
         p.rotation = 0;
 
+        bool jump = false;
         if (p.grounded) {
+            if (p.input && (p.prevPlayer().buffer || !p.prevPlayer().input || p.vehicleBuffer)) {
+                jump = true;
+            } else {
+                p.setVelocity(0.0f, true);
+            }
             p.buffer = false;
+        } else if (p.buffer && p.coyoteFrames < (p.upsideDown ? PHYS_COYOTE_FRAMES_BALL : 1)) {
+            jump = true;
         }
 
-        // Spider instant teleportation on click
-        if (p.input && !p.prevPlayer().input) {
-            p.upsideDown = !p.upsideDown;
-
-            float targetSurfaceY = p.upsideDown ? p.ceiling : p.floor;
-            if (p.upsideDown) {
-                p.pos.y = targetSurfaceY - p.size.y / 2.0f;
-            } else {
-                p.pos.y = targetSurfaceY + p.size.y / 2.0f;
-            }
-
-            p.velocity = 0.0f;
-            p.velocityOverride = true;
-            p.grounded = true;
+        if (jump) {
+            p.spiderTeleport(true);
+            p.vehicleBuffer = false;
             p.buffer = false;
+            p.input = false;
+            p.roundVelocity = false;
         }
     };
 

@@ -134,7 +134,12 @@ void Block::collide(Player& p) const {
 
 	if (p.innerHitbox().intersects(*this)) {
 		// Hitting block head-on — Entity::intersects already handles rotation via OBB
-		p.dead = true;
+		if (p.vehicle.type == VehicleType::Wave && p.hasDBlock) {
+			// D-block allows Wave to slide on block surfaces
+			p.pos.y = p.grav(blockGravTop) + p.grav(p.size.y / 2.0f);
+		} else {
+			p.dead = true;
+		}
 	} else if (p.vehicle.type != VehicleType::Wave && blockGravTop - bottom <= clip && (padHitBefore || p.velocity <= 0.0f || p.gravityPortal)) {
 		// Landing on top of the block
 		if (isRotated) {
@@ -177,8 +182,8 @@ void Block::collide(Player& p) const {
 			p.snapData.object = *this;
 		}
 	} else {
-		// Ship, UFO, and Ball can hit the ceiling of a block without dying
-		if (p.vehicle.type == VehicleType::Ship || p.vehicle.type == VehicleType::Ufo || p.vehicle.type == VehicleType::Ball) {
+		// Ship, UFO, Ball, and any vehicle with H-Block active can hit the ceiling of a block without dying
+		if (p.hasHBlock || p.vehicle.type == VehicleType::Ship || p.vehicle.type == VehicleType::Ufo || p.vehicle.type == VehicleType::Ball) {
 			float playerGravTop = p.gravTop(p);
 
 			if (isRotated) {
