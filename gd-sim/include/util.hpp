@@ -34,7 +34,15 @@ template <typename ...Args>
 struct velocity_map : public std::unordered_map<std::tuple<Args...>, std::vector<double>, hash_tuple> {
     using std::unordered_map<std::tuple<Args...>, std::vector<double>, hash_tuple>::unordered_map;
     double get(Args... args, int sec) const {
-        return *(this->at(std::tuple(args...)).begin() + sec);
+        auto it = this->find(std::tuple(args...));
+        if (it != this->end()) {
+            if (sec >= 0 && sec < static_cast<int>(it->second.size())) {
+                return it->second[sec];
+            } else if (!it->second.empty()) {
+                return it->second.back();
+            }
+        }
+        return 0.0;
     }
 };
 

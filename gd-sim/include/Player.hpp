@@ -42,7 +42,7 @@ struct Player : public Entity {
         cow_set<int> usedEffects;
 
         // Potential slopes are important for block collisions. Reset per frame.
-        std::vector<Slope const*> potentialSlopes;
+        std::vector<Slope> potentialSlopes;
 
         /// Actions will be run at the beginning of every frame.
         std::vector<std::function<void(Player&)>> actions;

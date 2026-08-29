@@ -209,7 +209,7 @@ void Slope::calc(Player& p) const {
 }
 
 void Slope::collide(Player& p) const {
-	p.potentialSlopes.push_back(this);
+	p.potentialSlopes.push_back(*this);
 
 	if (orientation < 2 && expectedY(p) <= p.pos.y)
 		return;

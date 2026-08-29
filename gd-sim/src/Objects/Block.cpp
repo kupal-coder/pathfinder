@@ -78,11 +78,14 @@ void trySnap(Block const& b, Player& p) {
 	auto diff = b.pos - snapData.object.pos;
 	diff.y = p.grav(diff.y);
 	if (float threshold = snapThreshold(diff, p); threshold > 0) {
-		p.pos.x = std::clamp(
-			p.level->getState(snapData.playerFrame).nextPlayer()->pos.x + diff.x,
-			p.pos.x - threshold,
-			p.pos.x + threshold
-		);
+		auto const* nextP = p.level->getState(snapData.playerFrame).nextPlayer();
+		if (nextP) {
+			p.pos.x = std::clamp(
+				nextP->pos.x + diff.x,
+				p.pos.x - threshold,
+				p.pos.x + threshold
+			);
+		}
 	}
 }
 
@@ -119,9 +122,9 @@ void Block::collide(Player& p) const {
 		}
 	}
 
-	for (auto& entity : p.potentialSlopes) {
-		auto block_comp = entity->orientation < 2 ? getTop() : getBottom();
-		auto slope_comp = entity->orientation < 2 ? entity->getBottom() : entity->getTop();
+	for (auto const& slope : p.potentialSlopes) {
+		auto block_comp = slope.orientation < 2 ? getTop() : getBottom();
+		auto slope_comp = slope.orientation < 2 ? slope.getBottom() : slope.getTop();
 		if (block_comp - slope_comp < 2.0f) {
 			return;
 		}

@@ -100,15 +100,6 @@ int tryInputs(Level2& lvl, std::bitset<65536> const& inputs, int currentBestFram
 				break; // stuck in place, abandon this path
 			}
 		}
-
-		// 2. Relative performance: if clearly behind the best path, give up early
-		if (currentBestFrame > frame + earlyCheckFrame && f == frame + earlyCheckFrame) {
-			int framesSimulated = f - frame;
-			int bestProgress = currentBestFrame - frame;
-			if (framesSimulated < bestProgress - earlyKillMargin) {
-				break; // this path is way behind, no need to continue
-			}
-		}
 	}
 
 	int finalFrame = static_cast<int>(lvl.gameStates.size());

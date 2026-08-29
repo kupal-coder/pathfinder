@@ -8,17 +8,17 @@ void Hazard::collide(Player& player) const {
 }
 
 bool Sawblade::touching(Player const& player) const {
-    // 1. Get player center and half-extents
+    // 1. Get player center and half-extents (Entity::pos is the center)
     Entity playerHitbox = player.innerHitbox();
-    float pCenterX = playerHitbox.x + playerHitbox.width * 0.5f;
-    float pCenterY = playerHitbox.y + playerHitbox.height * 0.5f;
-    float pHalfW   = playerHitbox.width * 0.5f;
-    float pHalfH   = playerHitbox.height * 0.5f;
+    float pCenterX = playerHitbox.pos.x;
+    float pCenterY = playerHitbox.pos.y;
+    float pHalfW   = playerHitbox.size.x * 0.5f;
+    float pHalfH   = playerHitbox.size.y * 0.5f;
 
     // 2. Sawblade center and fatal radius (GD saw fatal radius is ~60% of size)
-    float sCenterX = this->x + this->width * 0.5f;
-    float sCenterY = this->y + this->height * 0.5f;
-    float sRadius  = (this->width * 0.5f) * 0.60f; 
+    float sCenterX = this->pos.x;
+    float sCenterY = this->pos.y;
+    float sRadius  = (this->size.x * 0.5f) * 0.60f; 
 
     // 3. Find closest point on Player AABB to Sawblade Center
     float closestX = std::clamp(sCenterX, pCenterX - pHalfW, pCenterX + pHalfW);
@@ -28,4 +28,8 @@ bool Sawblade::touching(Player const& player) const {
     float dx = sCenterX - closestX;
     float dy = sCenterY - closestY;
     return (dx * dx + dy * dy) <= (sRadius * sRadius);
+}
+
+bool Spike::touching(Player const& player) const {
+    return Object::touching(player);
 }

@@ -191,7 +191,7 @@ class $modify(EditorPauseLayer) {
     }
 };
 
-class $modify(EditLevelLayer) {
+class $modify(DebugEditLevelLayer, EditLevelLayer) {
     bool init(GJGameLevel* p0) {
         EditLevelLayer::init(p0);
 
@@ -222,7 +222,7 @@ class $modify(EditLevelLayer) {
     }
 };
 
-class $modify(LevelEditorLayer) {
+class $modify(DebugLevelEditorLayer, LevelEditorLayer) {
     bool init(GJGameLevel* lvl, bool p1) {
         LevelEditorLayer::init(lvl, p1);
         (void)file::writeString(Mod::get()->getSaveDir() / "real.txt", realTxt);
@@ -255,7 +255,7 @@ class $modify(LevelEditorLayer) {
     }
 };
 
-class $modify(GJBaseGameLayer) {
+class $modify(DebugGJBaseGameLayer, GJBaseGameLayer) {
     void updateCamera(float dt) {
         GJBaseGameLayer::updateCamera(1 / 4.);
 
@@ -284,7 +284,7 @@ class $modify(GJBaseGameLayer) {
         }
     }
 };
-class $modify(PlayLayer) {
+class $modify(DebugPlayLayer, PlayLayer) {
     void resetLevel() {
         PlayLayer::resetLevel();
         realTxt = "";

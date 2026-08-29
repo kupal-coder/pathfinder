@@ -107,7 +107,12 @@ void Orb::collide(Player& p) const {
 			if (type == OrbType::Black) {
 				p.velocity = -810.0f;
 			} else {
-				p.velocity = orb_velocities.get(type, p.vehicle.type, p.small, std::min(3, p.speed));
+				VehicleType effectiveVehicle = p.vehicle.type;
+				if (effectiveVehicle == VehicleType::Robot) effectiveVehicle = VehicleType::Cube;
+				else if (effectiveVehicle == VehicleType::Spider) effectiveVehicle = VehicleType::Ball;
+				else if (effectiveVehicle == VehicleType::Swing) effectiveVehicle = VehicleType::Ship;
+
+				p.velocity = orb_velocities.get(type, effectiveVehicle, p.small, std::min(3, p.speed));
 				p.grounded = false;
 				if (type == OrbType::Green) {
 					p.velocityOverride = true;

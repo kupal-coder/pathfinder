@@ -28,8 +28,9 @@ public:
 
     ~PathfinderNode() {
         m_stop = true;
-        if (m_result.valid())
-            m_result.get();
+        if (m_result.valid()) {
+            m_result.wait();
+        }
     }
 
     void finalize(std::vector<uint8_t> macro) {
@@ -104,10 +105,12 @@ public:
         auto handle = [this](CCMenuItemSpriteExtra* it) {
             m_stop = true;
 
-            if (it->getID() == "stop")
-                finalize(m_result.get());
-            else
+            if (it->getID() == "stop") {
+                if (m_result.valid())
+                    finalize(m_result.get());
+            } else {
                 removeFromParentAndCleanup(true);
+            }
         };
 
         auto menu = Build<CCMenu>::create().parent(this).id("menu").children(
@@ -163,7 +166,7 @@ public:
 
 };
 
-class $modify(EditLevelLayer) {
+class $modify(PathfinderEditLevelLayer, EditLevelLayer) {
     bool init(GJGameLevel* p0) {
         EditLevelLayer::init(p0);
 
@@ -191,7 +194,7 @@ class $modify(EditLevelLayer) {
     }
 };
 
-class $modify(LevelInfoLayer) {
+class $modify(PathfinderLevelInfoLayer, LevelInfoLayer) {
     bool init(GJGameLevel* level, bool challenge) {
         LevelInfoLayer::init(level, challenge);
 

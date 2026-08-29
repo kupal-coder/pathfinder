@@ -95,8 +95,14 @@ void Pad::collide(Player& p) const {
 			p.velocity = -p.velocity;
 	}
 
-	if (p.vehicle.type != VehicleType::Wave)
-		p.velocity = pad_velocities.get(type, p.vehicle.type, p.small, std::min(3, p.speed));
+	if (p.vehicle.type != VehicleType::Wave) {
+		VehicleType effectiveVehicle = p.vehicle.type;
+		if (effectiveVehicle == VehicleType::Robot) effectiveVehicle = VehicleType::Cube;
+		else if (effectiveVehicle == VehicleType::Spider) effectiveVehicle = VehicleType::Ball;
+		else if (effectiveVehicle == VehicleType::Swing) effectiveVehicle = VehicleType::Ship;
+
+		p.velocity = pad_velocities.get(type, effectiveVehicle, p.small, std::min(3, p.speed));
+	}
 
 	p.grounded = false;
 	p.gravityPortal = false;

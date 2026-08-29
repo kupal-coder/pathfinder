@@ -99,17 +99,17 @@ Player& Level::runFrame(bool pressed, float dt) {
 	p.preCollision(pressed);
 
 	// Objects from previous, current, and next section are all collision tested
+	if (sections.empty()) {
+		p.postCollision();
+		gameStates.push_back(p);
+		return gameStates.back();
+	}
 	size_t sectionIdx = std::min(std::max(0, (int)(p.pos.x / sectionSize)), (int)sections.size() - 1);
-	auto prevSection = &sections[sectionIdx == 0 ? 0 : sectionIdx - 1];
+	auto prevSection = (sectionIdx > 0) ? &sections[sectionIdx - 1] : nullptr;
 	auto currSection = &sections[sectionIdx];
-	auto nextSection = &sections[sectionIdx + 1 >= sections.size() - 1 ? sections.size() - 1 : sectionIdx + 1];
+	auto nextSection = (sectionIdx + 1 < sections.size()) ? &sections[sectionIdx + 1] : nullptr;
 
-	// If at start or end of level, previous/next section is invalid so don't use it
-	std::vector<ObjectContainer>* sections[3] = { prevSection, nullptr, nullptr };
-	if (&currSection != &prevSection)
-		sections[1] = currSection;
-	if (&nextSection != &currSection)
-		sections[2] = nextSection;
+	std::vector<ObjectContainer>* activeSections[3] = { prevSection, currSection, nextSection };
 
 	// Blocks are hazards processed separately
 	std::vector<ObjectContainer> blocks;
@@ -118,7 +118,7 @@ Player& Level::runFrame(bool pressed, float dt) {
 	hazards.reserve(100);
 
 	size_t numCollisions = 0;
-	for (auto section : sections) {
+	for (auto section : activeSections) {
 		if (section == nullptr) continue;
 		for (auto& o : *section) {
 			if (p.dead) break;
