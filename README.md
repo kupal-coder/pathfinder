@@ -1,6 +1,6 @@
 # Pathfinder
 
-**Pathfinder** is an automated Geometry Dash physics simulation engine and frame-exact macro solver, implemented as both a high-performance **Geode Mod (C++20)** for in-game execution and an interactive **Web Visualization & Telemetry Dashboard (TypeScript / React / Canvas)**.
+**Pathfinder** is an automated Geometry Dash physics simulation engine and frame-exact macro solver, implemented as a high-performance **Geode Mod (C++20)** for in-game execution.
 
 ---
 
@@ -50,22 +50,6 @@ The repository includes pre-configured **GitHub Actions workflows** (`.github/wo
    - **Android / macOS**: Inside your respective Geode mod storage path.
 2. Ensure you have **`geode.node-ids`** (v1.18.0+) enabled via the Geode in-game mod browser.
 3. Launch Geometry Dash and open any level to access the Pathfinder solver interface.
-
----
-
-## 🌐 Web Simulator & Macro Exporter
-
-The web application provides an interactive simulator and macro generation workbench:
-- **Interactive 240Hz Canvas**: Real-time rendering of player trajectories, hitboxes, Spider raycasts, and vehicle visualizers.
-- **Pathfinder Solver**: Branch-and-bound trajectory search discovering frame-exact click timings.
-- **Macro Exporter**: One-click export to **xBot**, **MegaHack**, and **JSON** macro formats.
-- **Level Presets & Editor**: Built-in showcase levels for Fingerdash 2.1, Wave & D-Blocks, and Robot H-Block mechanics.
-
-To run the web preview locally:
-```bash
-npm install
-npm run dev
-```
 
 ---
 
