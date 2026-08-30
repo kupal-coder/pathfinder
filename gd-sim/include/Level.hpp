@@ -14,6 +14,8 @@ class Level {
 	void initLevelSettings(std::string const& lvlSettings, Player& player);
 	/// Post-parse: link teleport portal pairs by group ID
 	void linkTeleportPortals();
+	/// Rebind copied player/object state to this Level instance.
+	void rebindCopiedState();
  public:
  	/**
  	 * All player states are stored, including previous states. This way, Pathfinder
@@ -32,6 +34,10 @@ class Level {
  	bool debug = false;
 
  	Level(std::string const& lvlString);
+	Level(Level const& other);
+	Level& operator=(Level const& other);
+	Level(Level&& other) noexcept;
+	Level& operator=(Level&& other) noexcept;
 
  	/// The main update function. Every frame is associated with a press/release state.
  	Player& runFrame(bool pressed, float dt = 1/240.);
