@@ -2,6 +2,7 @@
 #include <iomanip>
 #include <unordered_map>
 #include <algorithm>
+#include <utility>
 #include <Level.hpp>
 #include <Portals.hpp>
 
@@ -34,6 +35,61 @@ void Level::initLevelSettings(std::string const& lvlSettings, Player& player) {
 	player.vehicle = Vehicle::from(static_cast<VehicleType>(atoi(get_or("kA2", "0"))));
 	player.floor = 0;
 	player.ceiling = player.vehicle.bounds;
+}
+
+Level::Level(Level const& other)
+    : gameStates(other.gameStates),
+      objectCount(other.objectCount),
+      sections(other.sections),
+      length(other.length),
+      debug(other.debug) {
+    rebindCopiedState();
+}
+
+Level& Level::operator=(Level const& other) {
+    if (this == &other) return *this;
+    gameStates = other.gameStates;
+    objectCount = other.objectCount;
+    sections = other.sections;
+    length = other.length;
+    debug = other.debug;
+    rebindCopiedState();
+    return *this;
+}
+
+Level::Level(Level&& other) noexcept
+    : gameStates(std::move(other.gameStates)),
+      objectCount(other.objectCount),
+      sections(std::move(other.sections)),
+      length(other.length),
+      debug(other.debug) {
+    rebindCopiedState();
+}
+
+Level& Level::operator=(Level&& other) noexcept {
+    if (this == &other) return *this;
+    gameStates = std::move(other.gameStates);
+    objectCount = other.objectCount;
+    sections = std::move(other.sections);
+    length = other.length;
+    debug = other.debug;
+    rebindCopiedState();
+    return *this;
+}
+
+void Level::rebindCopiedState() {
+    for (auto& state : gameStates)
+        state.level = this;
+
+    // ObjectContainer copies preserve raw bytes, so portal links still point
+    // into the source Level until they are rebuilt here.
+    for (auto& section : sections) {
+        for (auto& object : section) {
+            if (auto* portal = object->asTeleportPortal())
+                portal->linkedPortal = nullptr;
+        }
+    }
+    linkTeleportPortals();
 }
 
 Level::Level(std::string const& lvlString) {
