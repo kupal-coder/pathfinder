@@ -2,7 +2,7 @@
 #include <Player.hpp>
 
 TeleportPortal::TeleportPortal(Vec2D size, std::unordered_map<int, std::string>&& fields)
-    : EffectObject(size, std::move(fields)), linkedPortal(nullptr), cooldown(0) {
+    : EffectObject(size, std::unordered_map<int, std::string>(fields)), linkedPortal(nullptr), cooldown(0) {
     // Group ID is stored in field 57 for teleport portals
     auto it = fields.find(57);
     if (it != fields.end()) {
