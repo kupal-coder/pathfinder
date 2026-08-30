@@ -1,8 +1,0 @@
-{
-  "name": "Pathfinding Pro - Geometry Dash Physics Simulator & Macro Solver",
-  "description": "Pathfinding Pro by percjue: 240Hz frame-exact Geometry Dash physics engine and automated bot pathfinder that solves levels and exports bot macros.",
-  "requestFramePermissions": [],
-  "majorCapabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
-}
