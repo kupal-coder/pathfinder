@@ -3,6 +3,7 @@
 #include <Level.hpp>
 #include <string>
 #include <cmath>
+#include <exception>
 
 #include <Block.hpp>
 #include <Hazard.hpp>
@@ -32,7 +33,16 @@ std::vector<int> unroll(std::vector<range> ranges) {
 			return ObjectContainer(type({w, h}, std::move(ob)));
 
 std::optional<ObjectContainer> Object::create(std::unordered_map<int, std::string>&& ob) {
-	auto id = std::stoi(ob[1]);
+	auto idIt = ob.find(1);
+	if (idIt == ob.end())
+		return {};
+
+	int id = 0;
+	try {
+		id = std::stoi(idIt->second);
+	} catch (std::exception const&) {
+		return {};
+	}
 
 	objs(({
 		{1, 4}, {6, 7}, 63, {69, 72},

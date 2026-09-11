@@ -13,10 +13,11 @@ using namespace geode::utils::file;
 class PathfinderNode : public CCLayerColor {
     std::atomic_bool m_stop = false;
     std::atomic<double> m_progress = 0;
-    std::future<std::vector<uint8_t>> m_result;
+    std::future<PathfindResult> m_result;
     bool m_finalized = false;
     std::vector<uint8_t> m_macroData;
     std::string m_levelName;
+    bool m_solved = false;
 public:
     static PathfinderNode* create(std::string const& levelName, std::string const& lvlString) {
         auto node = new PathfinderNode();
@@ -35,10 +36,16 @@ public:
         }
     }
 
-    void finalize(std::vector<uint8_t> macro) {
+    void finalize(PathfindResult result) {
         if (m_finalized) return;
         m_finalized = true;
-        m_macroData = macro;
+        m_macroData = std::move(result.replay);
+        m_solved = result.solved;
+		if (!result.error.empty()) {
+			Notification::create(fmt::format("Pathfinding failed: {}", result.error), NotificationIcon::Error)->show();
+		} else if (!m_solved) {
+			Notification::create(fmt::format("No complete solution found ({:.2f}%)", result.progress), NotificationIcon::Warning)->show();
+		}
 
         if (auto stopBtn = getChildByIDRecursive("stop")) {
             stopBtn->setVisible(false);
@@ -84,7 +91,7 @@ public:
                 auto writeRes = writeBinary(targetPath, m_macroData);
                 if (writeRes.isOk()) {
                     log::info("Successfully exported macro to {}", targetPath.string());
-                    Notification::create("Macro exported successfully!", NotificationIcon::Success)->show();
+                    Notification::create(m_solved ? "Macro exported successfully!" : "Partial macro exported", m_solved ? NotificationIcon::Success : NotificationIcon::Warning)->show();
                 } else {
                     log::error("Failed to write macro: {}", writeRes.unwrapErr());
                     Notification::create("Failed to write macro file", NotificationIcon::Error)->show();
@@ -110,8 +117,12 @@ public:
 
     void keyBackClicked() override  {
         m_stop = true;
-        CCLayer::keyBackClicked();
-        removeFromParentAndCleanup(true);
+        if (auto stopBtn = getChildByIDRecursive("stop"))
+            stopBtn->setVisible(false);
+        if (auto closeBtn = getChildByIDRecursive("close"))
+            closeBtn->setVisible(false);
+        if (auto label = getChildByIDRecursive("percent"))
+            static_cast<CCLabelBMFont*>(label)->setString("Stopping...");
     }
 
     bool init(std::string const& levelName, std::string const& lvlString) {
@@ -128,7 +139,9 @@ public:
             });
             } catch (std::exception& e) {
                 log::error("{}", e.what());
-                return std::vector<uint8_t>();
+                PathfindResult result;
+                result.error = e.what();
+                return result;
             }
         });
 
@@ -147,10 +160,17 @@ public:
             m_stop = true;
 
             if (it->getID() == "stop") {
-                if (m_result.valid())
-                    finalize(m_result.get());
+                if (auto stopBtn = getChildByIDRecursive("stop"))
+                    stopBtn->setVisible(false);
+                if (auto closeBtn = getChildByIDRecursive("close"))
+                    closeBtn->setVisible(false);
+                if (auto label = getChildByIDRecursive("percent"))
+                    static_cast<CCLabelBMFont*>(label)->setString("Stopping...");
             } else {
-                removeFromParentAndCleanup(true);
+                if (auto closeBtn = getChildByIDRecursive("close"))
+                    closeBtn->setVisible(false);
+                if (auto label = getChildByIDRecursive("percent"))
+                    static_cast<CCLabelBMFont*>(label)->setString("Stopping...");
             }
         };
 
