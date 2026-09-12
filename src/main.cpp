@@ -155,7 +155,7 @@ public:
     }
 
     bool init(std::string const& levelName, std::string const& lvlString) {
-        CCLayerColor::initWithColor({0, 0, 0, 100});
+        if (!CCLayerColor::initWithColor({0, 0, 0, 100})) return false;
         setCascadeOpacityEnabled(true);
 
         m_levelName = levelName;
@@ -286,20 +286,26 @@ public:
                     .scale(0.8);*/
         ;
 
-        // D8: progress fill bar, kept below the percent label. Anchored to the
-        // label itself (rather than the layer) so it follows the popup layout
-        // no matter how the UI gets repositioned.
+        // D8: progress fill bar, kept below the percent label.
+        // NOTE: pctLabel is a CCLabelBMFont, which IS-A CCSpriteBatchNode and
+        // only accepts CCSprite children — parenting the CCLayerColor bars to
+        // it corrupts the batch node and crashes in addChild. Parent the bars
+        // to this layer instead (same coordinates: the popup menu sits at the
+        // layer origin, so menu-local == layer-local).
         if (auto pctLabel = getChildByIDRecursive("percent")) {
+            auto anchor = pctLabel->getPosition();
             Build<CCLayerColor>::create(ccColor4B{0, 0, 0, 150})
                 .contentSize({150, 6})
                 .id("bar-bg")
-                .move(0, -18)
-                .parent(pctLabel);
+                .pos(anchor.x, anchor.y - 18)
+                .parent(this);
             Build<CCLayerColor>::create(ccColor4B{70, 200, 70, 255})
                 .contentSize({0, 6})
                 .id("bar-fg")
-                .move(0, -18)
-                .parent(pctLabel);
+                .pos(anchor.x, anchor.y - 18)
+                .parent(this);
+        } else {
+            log::warn("Pathfinder popup label missing; skipping progress bar");
         }
 
         return true;
@@ -322,7 +328,13 @@ class $modify(PathfinderEditLevelLayer, EditLevelLayer) {
 
         btn.intoMenuItem([this]() {
                 auto lvlString = ZipUtils::decompressString(m_level->m_levelString, true, 0);
-                Build<PathfinderNode>::create(m_level->m_levelName, lvlString).parent(this).zOrder(100);
+                auto node = Build<PathfinderNode>::create(m_level->m_levelName, lvlString);
+                if (!node.collect()) {
+                    log::error("Pathfinder failed to create solver popup");
+                    Notification::create("Failed to open Pathfinder", NotificationIcon::Error)->show();
+                    return;
+                }
+                node.parent(this).zOrder(100);
         }).id("pathfinder-button")
           .intoNewParent(CCMenu::create())
           .parent(this)
@@ -350,7 +362,13 @@ class $modify(PathfinderLevelInfoLayer, LevelInfoLayer) {
 
         btn.intoMenuItem([this]() {
                 auto lvlString = ZipUtils::decompressString(m_level->m_levelString, true, 0);
-                Build<PathfinderNode>::create(m_level->m_levelName, lvlString).parent(this).zOrder(100);
+                auto node = Build<PathfinderNode>::create(m_level->m_levelName, lvlString);
+                if (!node.collect()) {
+                    log::error("Pathfinder failed to create solver popup");
+                    Notification::create("Failed to open Pathfinder", NotificationIcon::Error)->show();
+                    return;
+                }
+                node.parent(this).zOrder(100);
         }).id("pathfinder-button")
           .parent(getChildByID("other-menu"))
           .matchPos(getChildByIDRecursive("list-button"))
