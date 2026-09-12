@@ -53,6 +53,7 @@ struct ObjectContainer {
     template <class T>
     ObjectContainer(T&& obj) {
         static_assert(sizeof(T) <= sizeof(buffer));
+        static_assert(alignof(T) <= alignof(Object));
         memcpy(buffer, (void*)&obj, sizeof(T));
     }
     Object const* operator->() const {

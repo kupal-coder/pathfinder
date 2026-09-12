@@ -57,8 +57,10 @@ static int countLevelTriggers(std::string const& lvlString) {
 		std::string obj = lvlString.substr(i, semi - i);
 		i = semi + 1;
 		size_t coma = obj.find(',');
-		if (coma == std::string::npos || coma == 0) continue;
-		long id = std::strtol(obj.substr(0, coma).c_str(), nullptr, 10);
+		if (coma == std::string::npos) continue;
+		size_t coma2 = obj.find(',', coma + 1);
+		if (coma2 == std::string::npos) continue;
+		long id = std::strtol(obj.substr(coma + 1, coma2 - coma - 1).c_str(), nullptr, 10);
 		if (id == 360 || (id >= 1049 && id <= 1072)) ++count;
 	}
 	return count;
@@ -244,7 +246,7 @@ struct SearchBranch {
 		lastCatalogedPct = pct;
 
 		float cutoffPct = pct - catalogWindowPct;
-		if (checkpoints.size() > 1) {
+		if (checkpoints.size() > 2) {
 			checkpoints.erase(
 				std::remove_if(checkpoints.begin() + 1, checkpoints.end() - 1,
 					[&](CheckpointNode const& c) { return pctOf(c.x) < cutoffPct; }),
@@ -288,30 +290,34 @@ struct SearchBranch {
 		int dynamicGap = std::min(minBacktrackGap + (stuckStreak - 1) * gapGrowthPerFail, maxBacktrackGap);
 
 		int deathFrame = lvl.currentFrame();
-		CheckpointNode* target = nullptr;
+		int targetIdx = -1;
 
 		for (int i = static_cast<int>(checkpoints.size()) - 1; i >= 0; --i) {
 			auto& cp = checkpoints[i];
 			if (cp.frame > deathFrame - dynamicGap) continue; // too close, no room to react differently
-			target = &cp;
+			targetIdx = i;
 			if (cp.failCount < maxFailsAtNode) break; // still usable — stop here
 			// else: this node is worn out, keep walking further back
 		}
 
-		if (target) {
-			target->failCount++;
-			lvl.gameStates.resize(target->frame);
-			lvl.gameStates.back() = target->state;
-			lvl.press = target->state.button;
+		if (targetIdx >= 0) {
+			checkpoints[targetIdx].failCount++;
+			// Cache before erase: erase below invalidates references/pointers.
+			int targetFrame = checkpoints[targetIdx].frame;
+			Player targetState = checkpoints[targetIdx].state;
+			float targetX = checkpoints[targetIdx].x;
+			lvl.gameStates.resize(targetFrame);
+			lvl.gameStates.back() = targetState;
+			lvl.press = targetState.button;
 
 			// Anything catalogued ahead of where we just rewound to belonged
 			// to the branch we're abandoning — throw it out, since jumping to
 			// it later would leave a gap of uninitialized states behind it.
 			checkpoints.erase(
 				std::remove_if(checkpoints.begin(), checkpoints.end(),
-					[&](CheckpointNode const& c) { return c.frame > target->frame; }),
+					[&](CheckpointNode const& c) { return c.frame > targetFrame; }),
 				checkpoints.end());
-			lastCatalogedPct = pctOf(target->x);
+			lastCatalogedPct = pctOf(targetX);
 		} else if (lvlBest.currentFrame() > 1) {
 			// Our local catalog is exhausted — the required gap has grown
 			// past our entire recorded history. Fall back to the best point
@@ -407,8 +413,6 @@ PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, st
 	constexpr int   basePairsPerTry    = 8;   // 8 pairs = 16 click events, more effective than 15 singles
 
 	auto runBranch = [&](SearchBranch& branch) {
-		std::uniform_int_distribution<int> idxDist(0, static_cast<int>(interesting.size()) - 1);
-
 		int passesSinceSync = 0;
 
 		while (!stop && branch.lvl.gameStates.back().pos.x < branch.lvl.length) {
@@ -457,6 +461,7 @@ PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, st
 			auto horizon = std::lower_bound(interesting.begin() + startIdx, interesting.end(), frame + maxSimFrames);
 			int horizonEnd = static_cast<int>(horizon - interesting.begin());
 			int availableRange = std::max(1, horizonEnd - startIdx);
+			std::uniform_int_distribution<int> windowDist(0, availableRange - 1);
 
 			for (int i = 0; i < branch.iterations; ++i) {
 				std::vector<uint8_t> inputs(maxSimFrames, 0);
@@ -486,16 +491,14 @@ PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, st
 				// 3) Fresh probes are only placed beyond the carried plan so
 				//    they extend it rather than corrupt it.
 				for (int j = 0; j < pairsPerTry; ++j) {
-					int idx = startIdx + (idxDist(branch.rng) % availableRange);
-					if (idx >= static_cast<int>(interesting.size()))
-						idx = static_cast<int>(interesting.size()) - 1;
+					int idx = startIdx + windowDist(branch.rng);
 
 					int rel = interesting[idx] + jitterDist(branch.rng) - frame;
 					if (rel < carryLen || rel >= maxSimFrames) continue;
 					inputs[rel] = 1;
 
 					int rel2 = interesting[idx] + jitterDist(branch.rng) + holdDist(branch.rng) - frame;
-					if (rel2 >= maxSimFrames) continue;
+					if (rel2 < carryLen || rel2 >= maxSimFrames) continue;
 					inputs[rel2] = 1;
 				}
 
@@ -547,7 +550,7 @@ PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, st
 					// lvlBest.currentFrame() whenever we're promoting a fresh
 					// best.
 					leaderPlan = branch.plan;
-					leaderPlanBase = branch.lvl.currentFrame();
+					leaderPlanBase = branch.lvlBest.currentFrame();
 				} else if (!branch.explorer) {
 					// Explorers (B3) never adopt the leader's line — that's the
 					// whole point of them. Everyone else, if we've fallen well
@@ -583,7 +586,7 @@ PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, st
 		if (branch.lvlBest.currentFrame() > leader.currentFrame()) {
 			leader = branch.lvlBest;
 			leaderPlan = branch.plan;
-			leaderPlanBase = branch.lvl.currentFrame();
+			leaderPlanBase = branch.lvlBest.currentFrame();
 		}
 	};
 
@@ -655,10 +658,12 @@ PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, st
 			std::string encoded = "0";
 			bool currentHold = false;
 			int maxFrame = inputs.empty() ? 1 : static_cast<int>(inputs.back().frame);
+			encoded.reserve(static_cast<size_t>(std::max(maxFrame, 1)));
+			size_t nextInput = 0;
 			for (int i = 1; i < maxFrame; ++i) {
-				if (!inputs.empty() && i == static_cast<int>(inputs.front().frame)) {
-					currentHold = inputs.front().down;
-					inputs.erase(inputs.begin());
+				if (nextInput < inputs.size() && i == static_cast<int>(inputs[nextInput].frame)) {
+					currentHold = inputs[nextInput].down;
+					++nextInput;
 				}
 				encoded += currentHold ? '1' : '0';
 			}

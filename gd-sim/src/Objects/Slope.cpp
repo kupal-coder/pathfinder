@@ -4,6 +4,23 @@
 #include <Player.hpp>
 #include <Physics.hpp>
 
+namespace {
+// Downhill slope ejection base speeds per speed tier [0.5x,1x,2x,3x,4x].
+// 3x/4x share 421.200108f — matches GD pattern where 3x/4x share
+// constants (see Physics.hpp: PHYS_CUBE_GRAVITY, PHYS_BALL_JUMP).
+// Clamped accessor prevents OOB if speed is ever out of range.
+constexpr float kSlopeFalls[5] = {
+    226.044054f,
+    280.422108f,
+    348.678108f,
+    421.200108f,
+    421.200108f
+};
+inline float slopeFall(int speed) {
+    return kSlopeFalls[std::clamp(speed, 0, 4)];
+}
+} // namespace
+
 /// Slopes are possibly the most complicated object. This is still very unfinished!
 Slope::Slope(Vec2D size, std::unordered_map<int, std::string>&& fields) : Block(size, std::move(fields)) {
 	auto rot = stod_def(fields[6].c_str());
@@ -125,14 +142,7 @@ void Slope::calc(Player& p) const {
 
 		// Ejections, but downwards!
 		if (p.getTop() <= pos.y) {
-			static constexpr float falls[5] = {
-				226.044054f,
-				280.422108f,
-				348.678108f,
-				421.200108f,
-				421.200108f
-			};
-			float vel = -falls[p.speed] * (size.y / size.x);
+			float vel = -slopeFall(p.speed) * (size.y / size.x);
 			p.velocity = 0.0f;
 
 			p.actions.push_back([vel](Player& p) {
@@ -189,15 +199,8 @@ void Slope::calc(Player& p) const {
 		// Ejection from ceiling slope — pushes player downward (world space)
 		// which is "upward" relative to inverted gravity
 		if (p.getBottom() >= pos.y) {
-			static constexpr float falls[5] = {
-				226.044054f,
-				280.422108f,
-				348.678108f,
-				421.200108f,
-				421.200108f
-			};
 			// Positive velocity = pushes down in world space = up relative to upside-down gravity
-			float vel = falls[p.speed] * (size.y / size.x);
+			float vel = slopeFall(p.speed) * (size.y / size.x);
 			p.velocity = 0.0f;
 
 			p.actions.push_back([vel](Player& p) {
