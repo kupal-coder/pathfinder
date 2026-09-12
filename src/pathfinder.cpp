@@ -676,6 +676,7 @@ PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, st
 		output.inputs.push_back(gdr::Input(static_cast<uint32_t>(f), 1, false, false));
 	}
 	result.replay = output.exportData().unwrapOr({});
+	result.inputsRecorded = output.inputs.size();
 	result.progress = seed.length > 0.0f
 		? std::min((lvlBest.latestState().pos.x / lvlBest.length) * 100.0, 100.0)
 		: 0.0;
