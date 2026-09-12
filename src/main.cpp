@@ -87,7 +87,7 @@ public:
             if (m_macroData.empty()) {
                 log::warn("Pathfinder macro data is empty (no inputs were recorded or level was not solved)");
                 Notification::create("Nothing to export: macro data is empty", NotificationIcon::Warning)->show();
-                return;
+                co_return;
             }
 
             auto saveDir = Mod::get()->getSaveDir();
