@@ -290,12 +290,12 @@ public:
         // label itself (rather than the layer) so it follows the popup layout
         // no matter how the UI gets repositioned.
         if (auto pctLabel = getChildByIDRecursive("percent")) {
-            Build<CCLayerColor>::create({0, 0, 0, 150})
+            Build<CCLayerColor>::create(ccColor4B{0, 0, 0, 150})
                 .contentSize({150, 6})
                 .id("bar-bg")
                 .move(0, -18)
                 .parent(pctLabel);
-            Build<CCLayerColor>::create({70, 200, 70, 255})
+            Build<CCLayerColor>::create(ccColor4B{70, 200, 70, 255})
                 .contentSize({0, 6})
                 .id("bar-fg")
                 .move(0, -18)
