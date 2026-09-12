@@ -22,6 +22,38 @@
 			"pathfinder.png"
 		]
 	},
+	"settings": {
+		"input-offset": {
+			"type": "int",
+			"name": "Input offset (frames)",
+			"description": "Shift every macro input by this many 240Hz frames (positive = later). Adjust if the exported macro desyncs at the very start of a run.",
+			"default": 0,
+			"min": -120,
+			"max": 120,
+			"control": {
+				"slider": true
+			}
+		},
+		"solver-seed": {
+			"type": "int",
+			"name": "Solver seed",
+			"description": "0 = use a new random seed every run. Set a fixed number to make the search fully reproducible: same level + same seed always produces the same result.",
+			"default": 0,
+			"min": 0,
+			"max": 2147483647
+		},
+		"max-idle-seconds": {
+			"type": "int",
+			"name": "Auto-stop after idle (s)",
+			"description": "Stop the search if no new progress is made for this many seconds. 0 = disabled (search until solved or stopped manually).",
+			"default": 0,
+			"min": 0,
+			"max": 600,
+			"control": {
+				"slider": true
+			}
+		}
+	},
 	"description": "Beat levels automatically!",
 	"tags": ["offline", "gameplay", "utility"],
 	"links": {
