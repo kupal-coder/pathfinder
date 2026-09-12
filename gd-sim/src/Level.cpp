@@ -42,7 +42,7 @@ void Level::initLevelSettings(std::string const& lvlSettings, Player& player) {
 Level::Level(Level const& other)
     : gameStates(other.gameStates),
       objectCount(other.objectCount),
-      sections(other.sections),
+      geom(other.geom),
       length(other.length),
       debug(other.debug) {
     rebindCopiedState();
@@ -52,7 +52,7 @@ Level& Level::operator=(Level const& other) {
     if (this == &other) return *this;
     gameStates = other.gameStates;
     objectCount = other.objectCount;
-    sections = other.sections;
+    geom = other.geom;
     length = other.length;
     debug = other.debug;
     rebindCopiedState();
@@ -62,7 +62,7 @@ Level& Level::operator=(Level const& other) {
 Level::Level(Level&& other) noexcept
     : gameStates(std::move(other.gameStates)),
       objectCount(other.objectCount),
-      sections(std::move(other.sections)),
+      geom(std::move(other.geom)),
       length(other.length),
       debug(other.debug) {
     rebindCopiedState();
@@ -72,7 +72,7 @@ Level& Level::operator=(Level&& other) noexcept {
     if (this == &other) return *this;
     gameStates = std::move(other.gameStates);
     objectCount = other.objectCount;
-    sections = std::move(other.sections);
+    geom = std::move(other.geom);
     length = other.length;
     debug = other.debug;
     rebindCopiedState();
@@ -80,18 +80,10 @@ Level& Level::operator=(Level&& other) noexcept {
 }
 
 void Level::rebindCopiedState() {
+    // Geometry is shared (never mutated after parse); only player states
+    // reference their owning Level and need rebinding after a copy/move.
     for (auto& state : gameStates)
         state.level = this;
-
-    // ObjectContainer copies preserve raw bytes, so portal links still point
-    // into the source Level until they are rebuilt here.
-    for (auto& section : sections) {
-        for (auto& object : section) {
-            if (auto* portal = object->asTeleportPortal())
-                portal->linkedPortal = nullptr;
-        }
-    }
-    linkTeleportPortals();
 }
 
 Level::Level(std::string const& lvlString) {
@@ -102,6 +94,9 @@ Level::Level(std::string const& lvlString) {
 
 	// First player state
 	auto player = Player();
+
+	// Static geometry is built locally, linked once, then shared read-only.
+	auto built = std::make_shared<SectionList>();
 
 	while (std::getline(ss, objstr, ';')) {
 		// First entry is level settings object
@@ -132,9 +127,9 @@ Level::Level(std::string const& lvlString) {
 			ob->id = objectCount++;
 			// Sections are divided by x position in increments of 100
 			size_t sectionPos = std::max(.0f, ob->pos.x / sectionSize);
-			if (sectionPos >= sections.size())
-				sections.resize(sectionPos + 1);
-			sections[sectionPos].push_back(ob);
+			if (sectionPos >= built->size())
+				built->resize(sectionPos + 1);
+			(*built)[sectionPos].push_back(ob);
 			if (ob->pos.x > length)
 				length = ob->pos.x + 100;
 		}
@@ -143,8 +138,10 @@ Level::Level(std::string const& lvlString) {
 	player.level = this;
 	gameStates.push_back(player);
 
-	// Post-parse linking: connect teleport portal pairs by group ID
-	linkTeleportPortals();
+	// Post-parse linking: connect teleport portal pairs by group ID, then
+	// share the finished geometry (never mutated afterwards).
+	linkTeleportPortals(*built);
+	geom = std::move(built);
 }
 
 Player& Level::runFrame(bool pressed, float dt) {
@@ -155,6 +152,9 @@ Player& Level::runFrame(bool pressed, float dt) {
 
 	p.dt = dt;
 	p.preCollision(pressed);
+
+	// Shared static geometry (read-only after parse).
+	auto const& sections = *geom;
 
 	// Objects from previous, current, and next section are all collision tested
 	if (sections.empty()) {
@@ -167,7 +167,7 @@ Player& Level::runFrame(bool pressed, float dt) {
 	auto currSection = &sections[sectionIdx];
 	auto nextSection = (sectionIdx + 1 < sections.size()) ? &sections[sectionIdx + 1] : nullptr;
 
-	std::vector<ObjectContainer>* activeSections[3] = { prevSection, currSection, nextSection };
+	std::vector<ObjectContainer> const* activeSections[3] = { prevSection, currSection, nextSection };
 
 	// Blocks are hazards processed separately
 	std::vector<ObjectContainer> blocks;
@@ -192,7 +192,7 @@ Player& Level::runFrame(bool pressed, float dt) {
 	}
 
 	// Blocks are processed in descending order
-	for (int i = blocks.size() - 1; i >= 0; --i) {
+	for (int i = static_cast<int>(blocks.size()) - 1; i >= 0; --i) {
 		if (p.dead) break;
 		auto& b = blocks[i];
 		if (b->touching(p)) {
@@ -246,7 +246,7 @@ Player& Level::latestState() {
 	return gameStates.back();
 }
 
-void Level::linkTeleportPortals() {
+void Level::linkTeleportPortals(SectionList& sections) {
 	// Collect all teleport portals and group them by groupId
 	std::unordered_map<int, std::vector<TeleportPortal*>> portalGroups;
 

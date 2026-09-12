@@ -164,13 +164,17 @@ public:
         m_lastProgressAt = m_startTime;
         m_maxIdleSeconds = static_cast<int>(Mod::get()->getSettingValue<int64_t>("max-idle-seconds"));
 
-        m_result = std::async(std::launch::async, [lvlString, this]() {
+        // Read settings on the UI thread before spawning the solver: Geode
+        // setting access isn't guaranteed thread-safe from worker threads.
+        int inputOffset = static_cast<int>(Mod::get()->getSettingValue<int64_t>("input-offset"));
+        int solverSeed = static_cast<int>(Mod::get()->getSettingValue<int64_t>("solver-seed"));
+
+        m_result = std::async(std::launch::async, [lvlString, this, inputOffset, solverSeed]() {
             try {
             return pathfind(lvlString, m_stop, [this](double progress) {
                 if (m_progress < progress)
                     m_progress = progress;
-            }, static_cast<int>(Mod::get()->getSettingValue<int64_t>("input-offset")),
-               static_cast<int>(Mod::get()->getSettingValue<int64_t>("solver-seed")));
+            }, inputOffset, solverSeed);
             } catch (std::exception& e) {
                 log::error("{}", e.what());
                 PathfindResult result;
@@ -286,12 +290,12 @@ public:
         // label itself (rather than the layer) so it follows the popup layout
         // no matter how the UI gets repositioned.
         if (auto pctLabel = getChildByIDRecursive("percent")) {
-            Build<CCLayerColor>::create({0, 0, 0, 150})
+            Build<CCLayerColor>::create(ccColor4B{0, 0, 0, 150})
                 .contentSize({150, 6})
                 .id("bar-bg")
                 .move(0, -18)
                 .parent(pctLabel);
-            Build<CCLayerColor>::create({70, 200, 70, 255})
+            Build<CCLayerColor>::create(ccColor4B{70, 200, 70, 255})
                 .contentSize({0, 6})
                 .id("bar-fg")
                 .move(0, -18)

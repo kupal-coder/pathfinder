@@ -1,4 +1,5 @@
 #pragma once
+#include <cerrno>
 #include <cmath>
 #include <iostream>
 #include <utility>
@@ -131,6 +132,19 @@ inline float stod_def(std::string const& str, float def = 0) {
     }
 
     return out;
+}
+
+/// Integer field lookup that never throws: missing/invalid keys yield def.
+/// (Object::create guarantees numeric ids today, but ctors shouldn't bet a
+/// whole parse on it.)
+inline int stoi_def(std::unordered_map<int, std::string> const& fields, int key, int def = 0) {
+    auto it = fields.find(key);
+    if (it == fields.end()) return def;
+    try {
+        return std::stoi(it->second);
+    } catch (...) {
+        return def;
+    }
 }
 
 struct Vec2D {

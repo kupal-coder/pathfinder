@@ -3,7 +3,7 @@
 #include <Physics.hpp>
 
 Orb::Orb(Vec2D size, std::unordered_map<int, std::string>&& fields) : EffectObject(size, std::move(fields)) {
-	switch (std::stoi(fields[1])) {
+	switch (stoi_def(fields, 1)) {
 		case 36:
 			type = OrbType::Yellow;
 			break;

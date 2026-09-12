@@ -57,11 +57,13 @@ void runTestSim(std::string const& level, std::filesystem::path const& path) {
     std::string encoded = "0";
     bool currentHold = false;
 
-    int maxFrame = inputs.back().frame;
+    int maxFrame = inputs.empty() ? 1 : static_cast<int>(inputs.back().frame);
+    encoded.reserve(inputs.empty() ? 1 : static_cast<size_t>(maxFrame));
+    size_t nextInput = 0;
     for (int i = 1; i < maxFrame; ++i) {
-        if (i == inputs.front().frame) {
-            currentHold = inputs.front().down;
-            inputs.erase(inputs.begin());
+        if (nextInput < inputs.size() && i == static_cast<int>(inputs[nextInput].frame)) {
+            currentHold = inputs[nextInput].down;
+            ++nextInput;
         }
 
         encoded += currentHold ? '1' : '0';

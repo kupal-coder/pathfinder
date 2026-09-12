@@ -1,7 +1,7 @@
 #include <Portals.hpp>
 #include <Player.hpp>
 
-GravityPortal::GravityPortal(Vec2D size, std::unordered_map<int, std::string>&& fields) : EffectObject(size, std::move(fields)), upsideDown(std::stoi(fields[1]) == 11) {}
+GravityPortal::GravityPortal(Vec2D size, std::unordered_map<int, std::string>&& fields) : EffectObject(size, std::move(fields)), upsideDown(stoi_def(fields, 1) == 11) {}
 
 
 void GravityPortal::collide(Player& p) const {

@@ -198,7 +198,7 @@ Object::Object(Vec2D s, std::unordered_map<int, std::string>&& fields) {
 
 bool Object::touching(Player const& player) const {
 	int r = std::abs(rotation);
-	return intersects((r == 0 || r == 90 || r == 180 || r == 270) ? player.unrotatedHitbox() : (Entity&)player);
+	return intersects((r == 0 || r == 90 || r == 180 || r == 270) ? player.unrotatedHitbox() : static_cast<Entity const&>(player));
 }
 
 void Object::collide(Player&) const {
