@@ -26,6 +26,13 @@ struct PathfindResult {
     // Number of inputs in the exported macro. 0 with a non-empty replay
     // means a valid but input-less file; 0 bytes means nothing was encoded.
     size_t inputsRecorded = 0;
+    // Sim coverage: level objects with a sim mapping vs without. Unmapped
+    // objects are decorations/triggers — or blocks the sim doesn't know yet
+    // (desync suspect #1; include topIgnoredIds in bug reports).
+    size_t objectsModelled = 0;
+    size_t objectsIgnored = 0;
+    // Most common unmapped object ids, "id x count" formatted.
+    std::string topIgnoredIds;
 };
 
 PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, std::function<void(double)> callback, int inputOffset = 0, int solverSeed = 0);

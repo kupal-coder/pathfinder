@@ -175,6 +175,62 @@ std::optional<ObjectContainer> Object::create(std::unordered_map<int, std::strin
 	}), Slope, 60, 30)
 	objs(({ 364, 366, 1718 }), SlopeHazard, 60, 30);
 
+	// Extended 2.2 block coverage: base tiles of the block001/002/005/005b/
+	// 005c/006/007/007b/008/009/009b/009c/010/011/011b/012/012b/013 families
+	// (numbered _NN tiles, b/c color variants and _base cores share the same
+	// full-grid sprite), plus planks, puzzle bases, bricks and glow squares.
+	// Sourced from the texture->id map (2.2074 object sprites): every id
+	// below was verified to exist and to use a full-grid base sprite, so the
+	// standard 30x30 solid hitbox applies ("hitboxes are identical to how
+	// they appear visually"). Deliberately NOT mapped: trim/detail overlays
+	// (*_edge, *_light, *_detail, *_topcolor, *_bgcolor, *_piece, *_part) are
+	// sub-tile overlays — full hitboxes there would create phantom walls;
+	// perspective outlines, deco (d_*), editor icons and fake spikes are
+	// non-solid by design.
+	objs(({
+		{476, 482}, {485, 491}, {752, 759}, {903, 905}, 911,
+		{952, 959}, {974, 977}, {1299, 1304}, {1310, 1315},
+		{1162, 1186}, {1191, 1197}, 1322, {807, 825}, {1082, 1090},
+		{841, 848}, 850, {853, 857}, 859, {861, 863},
+		{867, 872}, {1266, 1267}, {880, 885}, 1062, {1159, 1160},
+		{890, 891}, {893, 894}, {1247, 1255}, {1277, 1290},
+		{927, 930}, {932, 934}, {1239, 1240}, {1348, 1355}, {1777, 1784},
+		{1431, 1452}, {1510, 1515}, 1793, 1795, 1799, 1801, 1803, 1805, 1807, 1809,
+		{1461, 1464}, {1769, 1772}, {373, 374}, {769, 770}, {967, 968},
+		{1079, 1081}, {1096, 1098}, {1908, 1909}, {1685, 1696}, 1797,
+		{245, 246}, {1893, 1898}, 211, 251, 259, 266, 273, {277, 278},
+		{1820, 1821}, {1823, 1828}
+	}), Block, 30, 30)
+	// Small 2.2 tiles: block007_01_small shares the half-size class.
+	objs(({ 1078, 1095 }), Block, 15, 15)
+	// Triangle-capped squares: same family as the calibrated 328 (22x22).
+	objs(({ {296, 297}, {324, 325}, 329, 358, {1901, 1902} }), Block, 22, 22)
+	// Outline-thick slabs: same thickness class as the calibrated
+	// Thick_01 (30x3) and Thickb_01 (30x6) entries above.
+	objs(({ {1205, 1207} }), Block, 30, 30)
+	objs(({ {1223, 1225} }), Block, 30, 30)
+
+	// Extended 2.2 slope pieces (*_slope, *_slope_square) and small triangle
+	// slopes. The _02 suffix behaves like the calibrated triangle_h_01
+	// (30x30 slope) and _04 like triangle_h_02 (60x30 slope).
+	objs(({
+		681, 683, 685, 689, 691, 687, 693, 695, 697, 699, 701,
+		{703, 706}, {762, 766}, {1033, 1036}, {960, 961}, {1037, 1038},
+		{964, 966}, {1039, 1040}, {1305, 1309}, {1316, 1320},
+		{1187, 1190}, {1198, 1201}, {1325, 1326}, {826, 829}, {1091, 1092}, 1108,
+		{830, 833}, {1093, 1094}, {877, 878}, {888, 889}, {895, 896}, {1256, 1259},
+		{1014, 1018}, {771, 775}, {969, 973}
+	}), Slope, 30, 30)
+	objs(({
+		682, 684, 686, 690, 692, 688, 694, 696, 698, 700, 702
+	}), Slope, 60, 30)
+
+	// Static fire and lava surfaces kill on contact. Hitboxes are estimates:
+	// flames are narrower/shorter than the full tile, lava kills at the
+	// surface strip.
+	objs(({ {920, 921}, {923, 924}, {1936, 1939} }), Hazard, 20, 16)
+	objs(({ 1591, 1593 }), Hazard, 30, 8)
+
 	// Any block that isnt' defined is ignored
 	return {};
 }

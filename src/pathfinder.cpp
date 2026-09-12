@@ -5,6 +5,8 @@
 #include <thread>
 #include <mutex>
 #include <sstream>
+#include <string>
+#include <vector>
 #include <cmath>
 #include <cstdlib>
 #include <chrono>
@@ -381,6 +383,20 @@ PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, st
 	if (triggerCount > 0) {
 		result.warning = "Level contains " + std::to_string(triggerCount) +
 			" unsupported trigger object(s) (e.g. Move/Rotate) — they move geometry in-game but not in the sim, so the macro may desync.";
+	}
+
+	// Sim-coverage diagnostics: how much of the level the solver can actually
+	// see. Anything unmapped is invisible to the search — fine for decorations
+	// and triggers, fatal for solid blocks and hazards.
+	result.objectsModelled = seed.objectCount;
+	for (auto& [id, n] : seed.ignoredObjectIds) result.objectsIgnored += n;
+	{
+		std::vector<std::pair<int, int>> top(seed.ignoredObjectIds.begin(), seed.ignoredObjectIds.end());
+		std::sort(top.begin(), top.end(), [](auto const& a, auto const& b) { return a.second > b.second; });
+		for (size_t i = 0; i < top.size() && i < 5; ++i) {
+			if (i) result.topIgnoredIds += " ";
+			result.topIgnoredIds += std::to_string(top[i].first) + "x" + std::to_string(top[i].second);
+		}
 	}
 
 	// Biased sampling fallback: if no objects found, sample uniformly.

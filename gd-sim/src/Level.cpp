@@ -42,6 +42,7 @@ void Level::initLevelSettings(std::string const& lvlSettings, Player& player) {
 Level::Level(Level const& other)
     : gameStates(other.gameStates),
       objectCount(other.objectCount),
+      ignoredObjectIds(other.ignoredObjectIds),
       geom(other.geom),
       length(other.length),
       debug(other.debug) {
@@ -52,6 +53,7 @@ Level& Level::operator=(Level const& other) {
     if (this == &other) return *this;
     gameStates = other.gameStates;
     objectCount = other.objectCount;
+    ignoredObjectIds = other.ignoredObjectIds;
     geom = other.geom;
     length = other.length;
     debug = other.debug;
@@ -62,6 +64,7 @@ Level& Level::operator=(Level const& other) {
 Level::Level(Level&& other) noexcept
     : gameStates(std::move(other.gameStates)),
       objectCount(other.objectCount),
+      ignoredObjectIds(std::move(other.ignoredObjectIds)),
       geom(std::move(other.geom)),
       length(other.length),
       debug(other.debug) {
@@ -72,6 +75,7 @@ Level& Level::operator=(Level&& other) noexcept {
     if (this == &other) return *this;
     gameStates = std::move(other.gameStates);
     objectCount = other.objectCount;
+    ignoredObjectIds = std::move(other.ignoredObjectIds);
     geom = std::move(other.geom);
     length = other.length;
     debug = other.debug;
@@ -121,6 +125,13 @@ Level::Level(std::string const& lvlString) {
 			player.pos.y = stod_def(obj[3], 0);
 		}
 
+		// Coverage bookkeeping: remember ids with no sim mapping (except
+		// the start pos, which is handled above and intentionally object-less).
+		int parsedId = 0;
+		if (auto idIt = obj.find(1); idIt != obj.end()) {
+			try { parsedId = std::stoi(idIt->second); } catch (...) {}
+		}
+
 		if (auto ob_o = Object::create(std::move(obj))) {
 			auto ob = ob_o.value();
 			// Unique ID
@@ -132,6 +143,8 @@ Level::Level(std::string const& lvlString) {
 			(*built)[sectionPos].push_back(ob);
 			if (ob->pos.x > length)
 				length = ob->pos.x + 100;
+		} else if (parsedId > 0 && parsedId != 31) {
+			ignoredObjectIds[parsedId]++;
 		}
 	}
 

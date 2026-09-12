@@ -73,8 +73,10 @@ public:
 
 		// Solver stats (C7): surface the diagnostics so a reproducible run is
 		// actually reproduce-able.
-        log::info("Pathfinder finished: {} ms, {} frames simulated across {} branch(es), seed {}, replay {} bytes / {} inputs",
-            result.wallTimeMs, result.framesSimulated, result.branchesUsed, result.seedUsed, result.replay.size(), result.inputsRecorded);
+        log::info("Pathfinder finished: {} ms, {} frames simulated across {} branch(es), seed {}, replay {} bytes / {} inputs, sim coverage {}/{} (top unmapped: {})",
+            result.wallTimeMs, result.framesSimulated, result.branchesUsed, result.seedUsed, result.replay.size(), result.inputsRecorded,
+            result.objectsModelled, result.objectsModelled + result.objectsIgnored,
+            result.topIgnoredIds.empty() ? "none" : result.topIgnoredIds);
 
         if (auto stopBtn = getChildByIDRecursive("stop")) {
             stopBtn->setVisible(false);

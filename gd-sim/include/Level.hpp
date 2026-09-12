@@ -3,6 +3,7 @@
 #include <Player.hpp>
 #include <memory>
 #include <vector>
+#include <unordered_map>
 
 /// Static level geometry: sections of objects built once at parse time
 /// (including teleport-portal links). Never mutated afterwards, so every
@@ -32,6 +33,12 @@ class Level {
 	std::vector<Player> gameStates;
 
 	size_t objectCount = 0;
+
+	/// Coverage bookkeeping: object ids seen at parse time that have no sim
+	/// mapping (decorations, triggers, not-yet-implemented blocks...).
+	/// Read-only after parse; diagnostics only, never used for solving.
+	/// Copy/move ops below must keep it in sync with the copied state.
+	std::unordered_map<int, int> ignoredObjectIds;
 
 	/// Shared static geometry (see SectionList). Sections are used just like
 	/// real GD. See Object.hpp for more info on ObjectContainer.
