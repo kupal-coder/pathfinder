@@ -1,6 +1,7 @@
 #include <set>
 #include <algorithm>
 #include <atomic>
+#include <memory>
 #include <thread>
 #include <mutex>
 #include <sstream>
@@ -70,13 +71,15 @@ struct Level2 : public Level {
 	bool press = false;
 	float highestY = 0;
 	bool dualLevel = false;
-	std::vector<int> interestingFrames; // pre-computed frames near objects
+	// Pre-computed frames near objects. Shared read-only across all branch
+	// copies so leader publishes don't copy the table around.
+	std::shared_ptr<const std::vector<int>> interestingFrames;
 
 	using Level::Level;
 
 	Level2(std::string const& lvlString) : Level(lvlString) {
 		// Find highest y
-		for (auto& i : sections) {
+		for (auto& i : *geom) {
 			for (auto& j : i) {
 				highestY = std::max(highestY, j->pos.y);
 			}
@@ -97,11 +100,21 @@ struct Level2 : public Level {
 	void buildInterestingFrames() {
 		constexpr float windowRadius = 30.0f; // ±30 frames around each object
 		constexpr float fps = 240.0f;
+		constexpr size_t maxFrames = 250000; // bound memory on huge levels
 
 		std::set<int> frameSet; // avoid duplicates during building
 
-		for (auto& section : sections) {
+		size_t objCount = 0;
+		for (auto& section : *geom) objCount += section.size();
+		// Each object contributes ~5 speeds x 61 frames; stride the window
+		// when that would blow past maxFrames.
+		int stride = 1;
+		while (stride < 8 && objCount * 5 * (2 * windowRadius / stride + 1) > maxFrames)
+			stride *= 2;
+
+		for (auto& section : *geom) {
 			for (auto& obj : section) {
+				if (obj->pos.x < 0.0f) continue;
 				// Speed portals can change the encounter frame substantially. Add
 				// candidates for every speed tier so the search does not depend on
 				// the level's initial speed remaining active.
@@ -111,15 +124,16 @@ struct Level2 : public Level {
 					int endFrame = static_cast<int>(encounterFrame + windowRadius);
 
 					if (startFrame < 1) startFrame = 1;
-					for (int f = startFrame; f <= endFrame; ++f) {
+					for (int f = startFrame; f <= endFrame; f += stride) {
 						frameSet.insert(f);
 					}
 				}
 			}
 		}
 
-		// Convert to sorted vector for fast random access
-		interestingFrames.assign(frameSet.begin(), frameSet.end());
+		// Convert to a shared sorted vector for fast random access.
+		// Every Level2 copy aliases the same table (never mutated).
+		interestingFrames = std::make_shared<const std::vector<int>>(frameSet.begin(), frameSet.end());
 	}
 };
 
@@ -127,7 +141,7 @@ bool isLevelEnd(Level2& lvl) {
 	return lvl.latestState().pos.x >= lvl.length;
 }
 
-	int tryInputs(Level2& lvl, std::vector<uint8_t> const& inputs, int currentBestFrame, std::atomic<long>& framesSimulated) {
+	int tryInputs(Level2& lvl, std::vector<uint8_t> const& inputs, std::atomic<long>& framesSimulated) {
 	auto frame = lvl.currentFrame();
 	auto press_before = lvl.press;
 
@@ -214,6 +228,9 @@ struct SearchBranch {
 	// surviving plan is exploited and refined instead of being re-randomized
 	// from scratch every time.
 	std::vector<uint8_t> plan;
+	// Absolute frame of the most recent death that triggered a backtrack.
+	// Fresh probes are biased just before it. 0 = none / stale.
+	int lastDeathFrame = 0;
 
 	// Explorer branches intentionally diverge: they never resync to the global
 	// leader and they sample wider, so the search keeps covering alternative
@@ -271,6 +288,7 @@ struct SearchBranch {
 		stuckStreak = 0;
 		iterations = 100;
 		plan.clear();
+		lastDeathFrame = 0;
 	}
 
 	// Called when a pass makes no forward progress at all. Rewinds to the
@@ -290,6 +308,7 @@ struct SearchBranch {
 		int dynamicGap = std::min(minBacktrackGap + (stuckStreak - 1) * gapGrowthPerFail, maxBacktrackGap);
 
 		int deathFrame = lvl.currentFrame();
+		lastDeathFrame = deathFrame;
 		int targetIdx = -1;
 
 		for (int i = static_cast<int>(checkpoints.size()) - 1; i >= 0; --i) {
@@ -333,6 +352,7 @@ struct SearchBranch {
 
 	void recordProgress() {
 		stuckStreak = 0;
+		lastDeathFrame = 0;
 		iterations = 100;
 		catalogAndPrune();
 		if (lvl.currentFrame() > lvlBest.currentFrame()) {
@@ -365,7 +385,8 @@ PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, st
 
 	// Biased sampling fallback: if no objects found, sample uniformly.
 	// Shared read-only across every branch — never mutated after this point.
-	std::vector<int> interesting = seed.interestingFrames;
+	// (Copied once here; the per-branch tables stay shared.)
+	std::vector<int> interesting = seed.interestingFrames ? *seed.interestingFrames : std::vector<int>{};
 	if (interesting.empty()) {
 		int maxF = std::max(100, static_cast<int>((seed.length / 400.0f) * 240.0f));
 		for (int f = 1; f < maxF; f += 10) {
@@ -411,6 +432,18 @@ PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, st
 	constexpr int   syncEveryPasses    = 25;  // how often a branch checks in against the others
 	constexpr float behindPctToResync  = 3.0f; // how far behind the leader before a branch gives up and joins it
 	constexpr int   basePairsPerTry    = 8;   // 8 pairs = 16 click events, more effective than 15 singles
+
+	// Record branch's best as the shared global leader if ahead, publishing
+	// its forward plan too. Caller must hold leaderMtx. The plan is aligned
+	// to the current commit point, which equals lvlBest.currentFrame()
+	// whenever a fresh best is promoted.
+	auto publishLeader = [&](SearchBranch& branch) {
+		if (branch.lvlBest.currentFrame() > leader.currentFrame()) {
+			leader = branch.lvlBest;
+			leaderPlan = branch.plan;
+			leaderPlanBase = branch.lvlBest.currentFrame();
+		}
+	};
 
 	auto runBranch = [&](SearchBranch& branch) {
 		int passesSinceSync = 0;
@@ -463,6 +496,24 @@ PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, st
 			int availableRange = std::max(1, horizonEnd - startIdx);
 			std::uniform_int_distribution<int> windowDist(0, availableRange - 1);
 
+			// Death-focused range: when stuck, half the probes land in the
+			// ~55 frames before the recent death so retries vary the fatal
+			// moment instead of re-rolling distant clicks. -1 = unavailable.
+			int focusStart = -1, focusCount = 0;
+			if (branch.lastDeathFrame > frame + carryLen) {
+				int fLo = std::max(branch.lastDeathFrame - 60, frame);
+				int fHi = std::min(branch.lastDeathFrame - 5, frame + maxSimFrames - 1);
+				if (fHi > fLo) {
+					auto f1 = std::lower_bound(interesting.begin() + startIdx, interesting.end(), fLo);
+					auto f2 = std::lower_bound(f1, interesting.end(), fHi);
+					if (f2 > f1) {
+						focusStart = static_cast<int>(f1 - interesting.begin());
+						focusCount = static_cast<int>(f2 - f1);
+					}
+				}
+			}
+			std::uniform_int_distribution<int> focusDist(0, std::max(focusCount - 1, 0));
+
 			for (int i = 0; i < branch.iterations; ++i) {
 				std::vector<uint8_t> inputs(maxSimFrames, 0);
 
@@ -489,9 +540,14 @@ PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, st
 				}
 
 				// 3) Fresh probes are only placed beyond the carried plan so
-				//    they extend it rather than corrupt it.
+				//    they extend it rather than corrupt it. Every other probe
+				//    goes to the death-focus window when one is available.
 				for (int j = 0; j < pairsPerTry; ++j) {
-					int idx = startIdx + windowDist(branch.rng);
+					int idx;
+					if (focusStart >= 0 && (j % 2 == 0))
+						idx = focusStart + focusDist(branch.rng);
+					else
+						idx = startIdx + windowDist(branch.rng);
 
 					int rel = interesting[idx] + jitterDist(branch.rng) - frame;
 					if (rel < carryLen || rel >= maxSimFrames) continue;
@@ -502,7 +558,7 @@ PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, st
 					inputs[rel2] = 1;
 				}
 
-				int nf = tryInputs(branch.lvl, inputs, bestFrame, framesSimulated);
+				int nf = tryInputs(branch.lvl, inputs, framesSimulated);
 				if (nf > bestFrame) {
 					bestFrame = nf;
 					bestInputs = inputs;
@@ -533,6 +589,13 @@ PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, st
 					branch.plan.assign(bestInputs.begin() + keepFrom, bestInputs.begin() + maxSimFrames);
 				}
 				branch.recordProgress();
+				// Opportunistic publish: share a new lead immediately so the
+				// other branches stop digging inferior lines. Non-blocking —
+				// the periodic sync below is the backstop.
+				{
+					std::unique_lock<std::mutex> tryLock(leaderMtx, std::try_to_lock);
+					if (tryLock.owns_lock()) publishLeader(branch);
+				}
 			}
 
 			// --- Cross-branch sync ---
@@ -543,14 +606,7 @@ PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, st
 				passesSinceSync = 0;
 				std::lock_guard<std::mutex> lock(leaderMtx);
 				if (branch.lvlBest.currentFrame() > leader.currentFrame()) {
-					leader = branch.lvlBest;
-					// Publish the forward plan so other branches can pick up
-					// where we left off instead of restarting the search. The
-					// plan is aligned to the current commit point, which equals
-					// lvlBest.currentFrame() whenever we're promoting a fresh
-					// best.
-					leaderPlan = branch.plan;
-					leaderPlanBase = branch.lvlBest.currentFrame();
+					publishLeader(branch);
 				} else if (!branch.explorer) {
 					// Explorers (B3) never adopt the leader's line — that's the
 					// whole point of them. Everyone else, if we've fallen well
@@ -583,11 +639,7 @@ PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, st
 		// Final check-in in case this branch never got to sync mid-run
 		// (e.g. it finished the level before the interval came up).
 		std::lock_guard<std::mutex> lock(leaderMtx);
-		if (branch.lvlBest.currentFrame() > leader.currentFrame()) {
-			leader = branch.lvlBest;
-			leaderPlan = branch.plan;
-			leaderPlanBase = branch.lvlBest.currentFrame();
-		}
+		publishLeader(branch);
 	};
 
 	std::vector<std::thread> threads;

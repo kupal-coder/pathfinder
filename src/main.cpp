@@ -164,13 +164,17 @@ public:
         m_lastProgressAt = m_startTime;
         m_maxIdleSeconds = static_cast<int>(Mod::get()->getSettingValue<int64_t>("max-idle-seconds"));
 
-        m_result = std::async(std::launch::async, [lvlString, this]() {
+        // Read settings on the UI thread before spawning the solver: Geode
+        // setting access isn't guaranteed thread-safe from worker threads.
+        int inputOffset = static_cast<int>(Mod::get()->getSettingValue<int64_t>("input-offset"));
+        int solverSeed = static_cast<int>(Mod::get()->getSettingValue<int64_t>("solver-seed"));
+
+        m_result = std::async(std::launch::async, [lvlString, this, inputOffset, solverSeed]() {
             try {
             return pathfind(lvlString, m_stop, [this](double progress) {
                 if (m_progress < progress)
                     m_progress = progress;
-            }, static_cast<int>(Mod::get()->getSettingValue<int64_t>("input-offset")),
-               static_cast<int>(Mod::get()->getSettingValue<int64_t>("solver-seed")));
+            }, inputOffset, solverSeed);
             } catch (std::exception& e) {
                 log::error("{}", e.what());
                 PathfindResult result;

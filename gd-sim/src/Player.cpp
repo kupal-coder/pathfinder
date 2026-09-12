@@ -1,6 +1,7 @@
 #include <Player.hpp>
 #include <Level.hpp>
 #include <Slope.hpp>
+#include <algorithm>
 #include <cmath>
 #include <climits>
 
@@ -101,13 +102,14 @@ void Player::spiderTeleport(bool reverseGravity) {
 	float closestDist = 999999.0f;
 	bool hitHazard = false;
 
-	if (level != nullptr && !level->sections.empty()) {
-		size_t sectionIdx = std::min(std::max(0, (int)(pos.x / Level::sectionSize)), (int)level->sections.size() - 1);
+	if (level != nullptr && level->geom && !level->geom->empty()) {
+		auto const& sections = *level->geom;
+		size_t sectionIdx = std::min(std::max(0, (int)(pos.x / Level::sectionSize)), (int)sections.size() - 1);
 		size_t minSec = (sectionIdx > 0) ? sectionIdx - 1 : 0;
-		size_t maxSec = std::min(level->sections.size() - 1, sectionIdx + 1);
+		size_t maxSec = std::min(sections.size() - 1, sectionIdx + 1);
 
 		for (size_t sec = minSec; sec <= maxSec; ++sec) {
-			for (auto const& obj : level->sections[sec]) {
+			for (auto const& obj : sections[sec]) {
 				float objLeft = obj->pos.x - obj->size.x * 0.5f;
 				float objRight = obj->pos.x + obj->size.x * 0.5f;
 

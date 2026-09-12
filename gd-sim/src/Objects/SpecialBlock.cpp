@@ -3,7 +3,7 @@
 
 SpecialBlock::SpecialBlock(Vec2D size, std::unordered_map<int, std::string>&& fields) : Object(size, std::move(fields)) {
 	prio = 0;
-	int objId = std::stoi(fields[1]);
+	int objId = stoi_def(fields, 1);
 	switch (objId) {
 		case 1813: type = SpecialBlockType::S; break;
 		case 1814: type = SpecialBlockType::J; break;

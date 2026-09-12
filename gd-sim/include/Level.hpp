@@ -1,7 +1,14 @@
 #pragma once
 #include <Object.hpp>
 #include <Player.hpp>
+#include <memory>
 #include <vector>
+
+/// Static level geometry: sections of objects built once at parse time
+/// (including teleport-portal links). Never mutated afterwards, so every
+/// Level copy/branch shares a single instance instead of deep-copying all
+/// objects on each copy. Per-run dynamic state lives in Level::gameStates.
+using SectionList = std::vector<std::vector<ObjectContainer>>;
 
 
 /**
@@ -12,9 +19,10 @@
 class Level {
 	/// Called by constructor, applies level settings to the initial player state
 	void initLevelSettings(std::string const& lvlSettings, Player& player);
-	/// Post-parse: link teleport portal pairs by group ID
-	void linkTeleportPortals();
-	/// Rebind copied player/object state to this Level instance.
+	/// Post-parse: link teleport portal pairs by group ID (build time only).
+	static void linkTeleportPortals(SectionList& sections);
+	/// Rebind copied player state to this Level instance. Geometry is shared
+	/// and never mutated after parse, so only gameStates need rebinding.
 	void rebindCopiedState();
  public:
  	/**
@@ -25,8 +33,9 @@ class Level {
 
 	size_t objectCount = 0;
 
-	/// Sections are used just like real GD. See Object.hpp for more info on ObjectContainer.
-	std::vector<std::vector<ObjectContainer>> sections;
+	/// Shared static geometry (see SectionList). Sections are used just like
+	/// real GD. See Object.hpp for more info on ObjectContainer.
+	std::shared_ptr<const SectionList> geom;
 
 	float length = 0.0;
 
