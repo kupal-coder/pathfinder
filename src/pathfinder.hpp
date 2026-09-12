@@ -23,6 +23,9 @@ struct PathfindResult {
     long framesSimulated = 0;
     int branchesUsed = 0;
     uint32_t seedUsed = 0;
+    // Number of inputs in the exported macro. 0 with a non-empty replay
+    // means a valid but input-less file; 0 bytes means nothing was encoded.
+    size_t inputsRecorded = 0;
 };
 
 PathfindResult pathfind(std::string const& lvlString, std::atomic_bool& stop, std::function<void(double)> callback, int inputOffset = 0, int solverSeed = 0);

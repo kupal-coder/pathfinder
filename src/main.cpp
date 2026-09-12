@@ -73,22 +73,46 @@ public:
 
 		// Solver stats (C7): surface the diagnostics so a reproducible run is
 		// actually reproduce-able.
-		log::info("Pathfinder finished: {} ms, {} frames simulated across {} branch(es), seed {}",
-			result.wallTimeMs, result.framesSimulated, result.branchesUsed, result.seedUsed);
+        log::info("Pathfinder finished: {} ms, {} frames simulated across {} branch(es), seed {}, replay {} bytes / {} inputs",
+            result.wallTimeMs, result.framesSimulated, result.branchesUsed, result.seedUsed, result.replay.size(), result.inputsRecorded);
 
         if (auto stopBtn = getChildByIDRecursive("stop")) {
             stopBtn->setVisible(false);
         }
  
         auto callback = [this]() -> arc::Future<void> {
+            // Fail fast before the file picker: exporting nothing leaves an
+            // orphan 0-byte entry behind on some platforms, because the save
+            // dialog creates the file up front.
+            if (m_macroData.empty()) {
+                log::warn("Pathfinder macro data is empty (no inputs were recorded or level was not solved)");
+                Notification::create("Nothing to export: macro data is empty", NotificationIcon::Warning)->show();
+                return;
+            }
+
             auto saveDir = Mod::get()->getSaveDir();
-            if (Loader::get()->isModLoaded("eclipse.eclipse-menu")) {
-                saveDir = Loader::get()->getLoadedMod("eclipse.eclipse-menu")->getSaveDir() / "replays";
+            std::string saveTarget = "Pathfinder";
+            // Save where the macro will actually be played back: XDBot reads
+            // its own macros folder and Eclipse its replays dir. Defaulting
+            // into the consumer's folder avoids round-tripping the bytes
+            // through the OS save picker on Android, which can leave a 0-byte
+            // entry behind while reporting success.
+            if (auto xdbot = Loader::get()->getLoadedMod("zilko.xdbot")) {
+                std::filesystem::path xdbotDir;
+                try {
+                    xdbotDir = xdbot->getSettingValue<std::filesystem::path>("macros_folder");
+                } catch (...) {}
+                saveDir = xdbotDir.empty() ? xdbot->getSaveDir() / "macros" : xdbotDir;
+                saveTarget = "XDBot";
+            } else if (auto eclipse = Loader::get()->getLoadedMod("eclipse.eclipse-menu")) {
+                saveDir = eclipse->getSaveDir() / "replays";
+                saveTarget = "Eclipse";
             }
 
             std::error_code ec;
-            if (!std::filesystem::exists(saveDir, ec)) {
-                std::filesystem::create_directories(saveDir, ec);
+            std::filesystem::create_directories(saveDir, ec);
+            if (ec) {
+                log::warn("Pathfinder could not create save dir {}: {}", saveDir.string(), ec.message());
             }
 
             // Sanitize filename for Android and Windows filesystem safety
@@ -116,18 +140,34 @@ public:
                 targetPath = defaultPath;
             }
 
-            if (!m_macroData.empty()) {
-                auto writeRes = writeBinary(targetPath, m_macroData);
-                if (writeRes.isOk()) {
-                    log::info("Successfully exported macro to {}", targetPath.string());
-                    Notification::create(m_solved ? "Macro exported successfully!" : "Partial macro exported", m_solved ? NotificationIcon::Success : NotificationIcon::Warning)->show();
-                } else {
-                    log::error("Failed to write macro: {}", writeRes.unwrapErr());
-                    Notification::create("Failed to write macro file", NotificationIcon::Error)->show();
-                }
+            // The save dialog may create the entry up front, so make sure the
+            // parent exists and verify the bytes actually landed afterwards —
+            // only then report success.
+            if (targetPath.has_parent_path()) {
+                std::filesystem::create_directories(targetPath.parent_path(), ec);
+            }
+
+            auto writeRes = writeBinary(targetPath, m_macroData);
+            std::error_code sizeEc;
+            auto writtenSize = std::filesystem::file_size(targetPath, sizeEc);
+            bool verified = writeRes.isOk() && !sizeEc && writtenSize == m_macroData.size();
+            if (verified) {
+                log::info("Successfully exported macro ({} bytes) to {}", m_macroData.size(), targetPath.string());
+                Notification::create(
+                    fmt::format("{} to {} ({} bytes)", m_solved ? "Macro exported" : "Partial macro exported", saveTarget, m_macroData.size()),
+                    m_solved ? NotificationIcon::Success : NotificationIcon::Warning)->show();
             } else {
-                log::warn("Pathfinder macro data is empty (no inputs were recorded or level was not solved)");
-                Notification::create("Warning: Macro data is empty", NotificationIcon::Warning)->show();
+                std::string reason;
+                if (writeRes.isErr()) reason = writeRes.unwrapErr();
+                else if (sizeEc) reason = fmt::format("could not verify file size: {}", sizeEc.message());
+                else reason = fmt::format("size mismatch: disk {} bytes, expected {}", writtenSize, m_macroData.size());
+                log::error("Failed to write macro to {}: {}", targetPath.string(), reason);
+                // Best-effort cleanup of the 0-byte orphan the picker may
+                // have created; never touch a file that has content.
+                if (!sizeEc && writtenSize == 0) {
+                    std::filesystem::remove(targetPath, ec);
+                }
+                Notification::create(fmt::format("Failed to write macro file: {}", reason), NotificationIcon::Error)->show();
             }
 
             queueInMainThread([this] {
@@ -136,11 +176,18 @@ public:
         };
 
         if (auto menu = getChildByID("menu")) {
-            Build<ButtonSprite>::create("Export", "bigFont.fnt", "GJ_button_01.png")
-                .intoMenuItem(async::wrapSpawn(callback))
-                .scale(0.8)
-                .move(0, -40)
-                .parent(menu);
+            if (!m_macroData.empty()) {
+                Build<ButtonSprite>::create("Export", "bigFont.fnt", "GJ_button_01.png")
+                    .intoMenuItem(async::wrapSpawn(callback))
+                    .scale(0.8)
+                    .move(0, -40)
+                    .parent(menu);
+            } else {
+                log::warn("Pathfinder export hidden: macro data is empty");
+                if (result.error.empty()) {
+                    Notification::create("Nothing to export: no inputs were recorded", NotificationIcon::Warning)->show();
+                }
+            }
         }
     }
 
