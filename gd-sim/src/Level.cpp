@@ -27,6 +27,8 @@ void Level::initLevelSettings(std::string const& lvlSettings, Player& player) {
 		player.speed = 1;
 	else if (player.speed == 1)
 		player.speed = 0;
+	// Malformed strings could give out-of-range tiers; PHYS_* tables are [0..4].
+	player.speed = std::clamp(player.speed, 0, 4);
 
 	if ((player.small = atoi(get_or("kA3", "0"))))
 		player.size = player.size * 0.6;
